@@ -28,6 +28,7 @@ const (
 	stateIndex
 	stateConnectDB
 	stateSettings
+	statePro
 )
 
 type sysInfoMsg *pb.GetSystemInfoResponse
@@ -75,6 +76,11 @@ type model struct {
 	// Settings / System Info
 	sysInfo      *pb.GetSystemInfoResponse
 	loadingSys   bool
+
+	// Pro
+	licenseInput textinput.Model
+	proStatus    string
+	activating   bool
 }
 
 func initialModel() model {
@@ -103,7 +109,7 @@ func initialModel() model {
 
 	return model{
 		state:            stateLoading,
-		dashboardOptions: []string{"Search Dataset", "Index New Data", "Connect Database", "Quit"},
+		dashboardOptions: []string{"Search Dataset", "Index New Data", "Connect Database", "Upgrade to Pro", "Quit"},
 		dashboardCursor:  0,
 		searchInput:      si,
 		pathInput:        pi,
@@ -114,6 +120,14 @@ func initialModel() model {
 		loadingStats: true,
 		loadingPercent: 0.0,
 		loadingLog:     "Initializing system...",
+
+		licenseInput: func() textinput.Model {
+			li := textinput.New()
+			li.Placeholder = "PRISM-PRO-XXXX-XXXX"
+			li.CharLimit = 32
+			li.Width = 40
+			return li
+		}(),
 	}
 }
 
@@ -150,6 +164,10 @@ type indexStreamMsg struct {
 }
 type indexDoneMsg struct{}
 type openResultMsg string
+type licenseActivatedMsg struct {
+	success bool
+	message string
+}
 type errMsg error
 type retryConnectMsg struct{}
 
@@ -206,6 +224,18 @@ func connectDBCmd(client pb.PrismServiceClient, path string) tea.Cmd {
 			return errMsg(err)
 		}
 		return dbConnectedMsg{success: resp.Success, message: resp.Message}
+	}
+}
+
+func activateLicenseCmd(client pb.PrismServiceClient, key string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		resp, err := client.ActivateLicense(ctx, &pb.ActivateLicenseRequest{LicenseKey: key})
+		if err != nil {
+			return errMsg(err)
+		}
+		return licenseActivatedMsg{success: resp.Success, message: resp.Message}
 	}
 }
 
@@ -374,9 +404,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					case "Connect Database":
 						m.state = stateConnectDB
 						m.dbInput.Focus()
+					case "Upgrade to Pro":
+						m.state = statePro
+						m.licenseInput.Focus()
 					case "Quit":
 						return m, tea.Quit
 					}
+				} else if m.state == statePro {
+					m.activating = true
+					m.proStatus = "Activating..."
+					cmds = append(cmds, activateLicenseCmd(m.client, m.licenseInput.Value()))
 				} else if m.state == stateConnectDB {
 					cmds = append(cmds, connectDBCmd(m.client, m.dbInput.Value()))
 					m.connecting = true
@@ -410,6 +447,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.state = stateHome
 					m.pathInput.Blur()
 				}
+				if m.state == statePro {
+					m.state = stateHome
+					m.licenseInput.Blur()
+				}
 			}
 		}
 
@@ -427,9 +468,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
         // If loading done but waiting for stats (rare race), we might need to handle.
         // For now, let Tick handle transition to Home when loading is 100% AND client != nil.
         
+	case licenseActivatedMsg:
+		m.activating = false
+		m.proStatus = msg.message
+		if msg.success {
+			cmds = append(cmds, getSystemInfoCmd(m.client))
+			// Refresh dashboard options in next step or via sysInfo
+		}
+
 	case sysInfoMsg:
 		m.loadingSys = false
 		m.sysInfo = msg
+		// If Pro, remove "Upgrade to Pro" from menu
+		if msg.IsPro {
+			newOpts := []string{}
+			for _, opt := range m.dashboardOptions {
+				if opt != "Upgrade to Pro" {
+					newOpts = append(newOpts, opt)
+				}
+			}
+			m.dashboardOptions = newOpts
+            if m.dashboardCursor >= len(m.dashboardOptions) {
+                m.dashboardCursor = 0
+            }
+		}
         
 	case dbConnectedMsg:
 		m.connecting = false
@@ -519,76 +581,127 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // -- View --
 
 func (m model) View() string {
+	if m.state == stateLoading {
+		return docStyle.Render(viewLoading(m))
+	}
+
 	var doc strings.Builder
 
 	// 1. Header (Tabs)
-    if m.state != stateLoading {
-        tabs := []string{"Dashboard", "Search", "Index", "Settings"}
-        var renderedTabs []string
-        for i, t := range tabs {
-            isActive := false
-            if (m.state == stateHome || m.state == stateConnectDB) && i == 0 {
-                isActive = true
-            }
-            if m.state == stateSearch && i == 1 {
-                isActive = true
-            }
-            if m.state == stateIndex && i == 2 {
-                isActive = true
-            }
-            if m.state == stateSettings && i == 3 {
-                isActive = true
-            }
+	tabs := []string{"Dashboard", "Search", "Index", "Settings"}
+	var renderedTabs []string
+	for i, t := range tabs {
+		isActive := false
+		if (m.state == stateHome || m.state == stateConnectDB) && i == 0 {
+			isActive = true
+		} else if m.state == stateSearch && i == 1 {
+			isActive = true
+		} else if m.state == stateIndex && i == 2 {
+			isActive = true
+		} else if m.state == stateSettings && i == 3 {
+			isActive = true
+		}
 
-            if isActive {
-                renderedTabs = append(renderedTabs, activeTabStyle.Render(t))
-            } else {
-                renderedTabs = append(renderedTabs, tabStyle.Render(t))
-            }
-        }
-        row := lipgloss.JoinHorizontal(lipgloss.Bottom, renderedTabs...)
-        gap := tabGapStyle.Render(strings.Repeat(" ", max(0, m.width-lipgloss.Width(row)-2)))
-        header := lipgloss.JoinHorizontal(lipgloss.Bottom, row, gap)
-        doc.WriteString(header + "\n\n")
-    }
+		if isActive {
+			renderedTabs = append(renderedTabs, activeTabStyle.Render(t))
+		} else {
+			renderedTabs = append(renderedTabs, tabStyle.Render(t))
+		}
+	}
+	tabRow := lipgloss.JoinHorizontal(lipgloss.Bottom, renderedTabs...)
+	gap := tabGapStyle.Render(strings.Repeat(" ", max(0, m.width-lipgloss.Width(tabRow)-2)))
+	header := lipgloss.JoinHorizontal(lipgloss.Bottom, tabRow, gap)
+	doc.WriteString(header + "\n\n")
 
-	// 2. Main Content Area
+	// 2. Main Content Area (Split View)
+	var mainContent string
 	switch m.state {
-	case stateLoading:
-		doc.WriteString(viewLoading(m))
 	case stateHome:
-		doc.WriteString(viewDashboard(m))
+		mainContent = viewDashboard(m)
 	case stateSearch:
-		doc.WriteString(viewSearch(m))
+		mainContent = viewSearch(m)
 	case stateIndex:
-		doc.WriteString(viewIndex(m))
+		mainContent = viewIndex(m)
 	case stateConnectDB:
-		doc.WriteString(viewConnectDB(m))
+		mainContent = viewConnectDB(m)
 	case stateSettings:
-		doc.WriteString(viewSettings(m))
+		mainContent = viewSettings(m)
+	case statePro:
+		mainContent = viewPro(m)
 	}
 
-	// 3. Footer
-    if m.state != stateLoading {
-        statusText := "● OFFLINE"
-        if m.client != nil {
-            statusText = "● ONLINE"
-        }
-        
-        statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF3333")).Bold(true)
-        if m.client != nil {
-            statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")).Bold(true)
-        }
+	// Sidebar Content
+	sidebar := viewSidebar(m)
 
-        left := subtleStyle.Render("PRISM v2.3 • Tab: Switch • Ctrl+C: Quit")
-        right := statusStyle.Render(statusText)
-        
-        gap := strings.Repeat(" ", max(0, m.width-lipgloss.Width(left)-lipgloss.Width(right)-2))
-        doc.WriteString("\n\n" + left + gap + right)
-    }
+	// Combine Main and Sidebar
+	splitView := lipgloss.JoinHorizontal(lipgloss.Top,
+		lipgloss.NewStyle().Width(m.width-35).Render(mainContent),
+		sidebarStyle.Width(30).Height(m.height-12).Render(sidebar),
+	)
+	doc.WriteString(splitView)
+
+	// 3. Footer / Help Bar
+	statusText := "● OFFLINE"
+	if m.client != nil {
+		statusText = "● ONLINE"
+	}
+	statusStyle := lipgloss.NewStyle().Foreground(errorColor).Bold(true)
+	if m.client != nil {
+		statusStyle = lipgloss.NewStyle().Foreground(successColor).Bold(true)
+	}
+
+	helpLeft := subtleStyle.Render(" "+asciiTexture) + "\n " + subtleStyle.Render(" TAB: CYCLE • ↑/↓: NAVIGATE • ENTER: SELECT • CTRL+C: QUIT")
+	helpRight := "\n" + statusStyle.Render(statusText+"  ")
+
+	footerGap := strings.Repeat(" ", max(0, m.width-lipgloss.Width(helpLeft)-lipgloss.Width(helpRight)-1))
+	footer := lipgloss.JoinHorizontal(lipgloss.Bottom, helpLeft, footerGap, helpRight)
+	
+	doc.WriteString("\n" + footer)
 
 	return docStyle.Render(doc.String())
 }
+
+func viewSidebar(m model) string {
+	var sections []string
+
+	// Section 1: System Health
+	healthStatus := "Stable"
+	if m.client == nil {
+		healthStatus = "Disconnected"
+	}
+	sections = append(sections, 
+		headerStyle.Render("NEURAL CORE"),
+		fmt.Sprintf("Status: %s", healthStatus),
+		fmt.Sprintf("Device: %s", "GPU/MPS"),
+	)
+
+	// Section 2: Contextual Info
+	if m.state == stateSearch && len(m.results) > 0 {
+		selected := m.results[m.cursor]
+		sections = append(sections,
+			"\n"+headerStyle.Render("SELECTED FRAME"),
+			fmt.Sprintf("Match: %.1f%%", selected.Confidence*100),
+			fmt.Sprintf("Res: %s", selected.Resolution),
+			fmt.Sprintf("Size: %s", selected.FileSize),
+		)
+	} else if m.stats != nil {
+		sections = append(sections,
+			"\n"+headerStyle.Render("DATASET STATS"),
+			fmt.Sprintf("Frames: %d", m.stats.TotalFrames),
+			fmt.Sprintf("Vectors: %d", m.stats.TotalEmbeddings),
+		)
+	}
+
+	// Section 3: Recent Logs (Simulation/Real)
+	sections = append(sections,
+		"\n"+headerStyle.Render("ACTIVITY LOG"),
+		logTextStyle.Render("Interface Ready"),
+		logTextStyle.Render("Backend Synced"),
+	)
+
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
 
 // -- Sub-Views --
 
@@ -614,211 +727,145 @@ func viewLoading(m model) string {
 
 
 func viewSettings(m model) string {
-	var content string
+	var content strings.Builder
+	content.WriteString(headerBoxStyle.Render("MODULAR NEURAL COMPONENTS") + "\n\n")
+
 	if m.loadingSys {
-		content = m.spinner.View() + " Querying Neural Core Components..."
+		content.WriteString("  " + m.spinner.View() + " Querying component hierarchy...")
 	} else if m.sysInfo != nil {
-		content = fmt.Sprintf(
-			"%s\n%s\n\n%s\n%s\n\n%s\n%s\n\n%s\n%s\n\n%s\n%s\n\n%s\n%s",
-			statLabelStyle.Render("Inference Device"), statValueStyle.Render(m.sysInfo.Device),
-			statLabelStyle.Render("Vision Model"), statValueStyle.Render(m.sysInfo.SiglipModel),
-			statLabelStyle.Render("Detection Model"), statValueStyle.Render(m.sysInfo.YoloModel),
-			statLabelStyle.Render("Backend Logic"), statValueStyle.Render(m.sysInfo.BackendVersion),
-			statLabelStyle.Render("Compute Threads"), statValueStyle.Render(fmt.Sprintf("%d", m.sysInfo.CpuCount)),
-			statLabelStyle.Render("System Memory"), statValueStyle.Render(m.sysInfo.MemoryUsage),
-		)
+		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("CORE DEVICE:"), keywordStyle.Render(m.sysInfo.Device)))
+		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("TRANSFORMER:"), m.sysInfo.SiglipModel))
+		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("DETECTOR:"), m.sysInfo.YoloModel))
+		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("VERSION:"), m.sysInfo.BackendVersion))
+		content.WriteString(fmt.Sprintf("%s %d threads\n", statLabelStyle.Render("THREADS:"), m.sysInfo.CpuCount))
+		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("MEMORY:"), m.sysInfo.MemoryUsage))
 	} else {
-		content = subtleStyle.Render("System telemetry unavailable.")
+		content.WriteString(subtleStyle.Render("Component telemetry unavailable."))
 	}
 
-	panel := panelStyle.
-		Width(m.width - 20).
-		Height(m.height - 15).
-		Render(
-			lipgloss.JoinVertical(lipgloss.Left,
-				headerStyle.Render("SYSTEM CONFIGURATION & MODULAR CORE"),
-				"",
-				content,
-			),
-		)
-
-	return lipgloss.Place(m.width, m.height-10, lipgloss.Center, lipgloss.Top, panel)
+	return lipgloss.NewStyle().Padding(1, 2).Render(content.String())
 }
+
 
 func viewDashboard(m model) string {
 	// Top: Banner
 	banner := RenderGradientBanner()
 
-	// Middle: Two Columns
-	// Left: Stats Panel
-	var statsContent string
-	if m.loadingStats {
-		statsContent = m.spinner.View() + " Fetching Telemetry..."
-	} else if m.stats != nil {
-		statsContent = fmt.Sprintf(
-			"%s\n%s\n\n%s\n%s\n\n%s\n%s\n\n%s\n%s",
-			statLabelStyle.Render("Frames Processed"), statValueStyle.Render(fmt.Sprintf("%d", m.stats.TotalFrames)),
-			statLabelStyle.Render("Vector Embeddings"), statValueStyle.Render(fmt.Sprintf("%d", m.stats.TotalEmbeddings)),
-			statLabelStyle.Render("Active DB"), statValueStyle.Render(m.stats.DbPath),
-			statLabelStyle.Render("Last Update"), statValueStyle.Render(m.stats.LastIndexed),
-		)
-	} else {
-		statsContent = subtleStyle.Render("No Data Available.\nConnect a Database.")
-	}
-	statsPanel := panelStyle.
-		Width(40).
-		Height(12).
-		Render(
-			lipgloss.JoinVertical(lipgloss.Left,
-				headerStyle.Render("SYSTEM TELEMETRY"),
-				"",
-				statsContent,
-			),
-		)
+	// Content Area
+	var content strings.Builder
+	content.WriteString(headerBoxStyle.Render("SYSTEM OVERVIEW") + "\n\n")
 
-	// Right: Menu/Actions
-	var options []string
+	if m.loadingStats {
+		content.WriteString(m.spinner.View() + " Synchronizing with Neural Database...")
+	} else if m.stats != nil {
+		content.WriteString(fmt.Sprintf(
+			"The %s engine is currently monitoring %s frames with a total of %s multidimensional embeddings.\n\n",
+			keywordStyle.Render("Prism Neural Core"),
+			statValueStyle.Render(fmt.Sprintf("%d", m.stats.TotalFrames)),
+			statValueStyle.Render(fmt.Sprintf("%d", m.stats.TotalEmbeddings)),
+		))
+		content.WriteString(fmt.Sprintf("Active Database: %s\n", keywordStyle.Render(m.stats.DbPath)))
+		content.WriteString(fmt.Sprintf("Last Ingestion Trace: %s\n", subtleStyle.Render(m.stats.LastIndexed)))
+	} else {
+		content.WriteString(subtleStyle.Render("No active intelligence trace detected. Please connect a database."))
+	}
+
+	// Menu
+	content.WriteString("\n\n" + headerBoxStyle.Render("COMMAND MODULES") + "\n")
 	for i, opt := range m.dashboardOptions {
 		cursor := "  "
 		style := subtleStyle
 		if i == m.dashboardCursor {
-			cursor = "> "
+			cursor = "❯ "
 			style = selectedItemStyle
 		}
-		options = append(options, style.Render(cursor+opt))
+		content.WriteString(style.Render(cursor+opt) + "\n")
 	}
-	menuPanel := panelStyle.
-		Width(30).
-		Height(12).
-		Render(
-			lipgloss.JoinVertical(lipgloss.Left,
-				headerStyle.Render("CONTROL CENTER"),
-				"",
-				lipgloss.JoinVertical(lipgloss.Left, options...),
-			),
-		)
 
-	return lipgloss.JoinVertical(
-		lipgloss.Center,
+	return lipgloss.JoinVertical(lipgloss.Center,
 		banner,
-		lipgloss.JoinHorizontal(lipgloss.Top, statsPanel, "   ", menuPanel),
+		"\n",
+		lipgloss.NewStyle().Padding(1, 2).Render(content.String()),
 	)
 }
 
 func viewSearch(m model) string {
-	// Input Area
-	input := panelStyle.Render(
-		lipgloss.JoinVertical(lipgloss.Left,
-			headerStyle.Render("NATURAL LANGUAGE QUERY"),
-			m.searchInput.View(),
-		),
+	// Header Section
+	header := lipgloss.JoinVertical(lipgloss.Left,
+		headerBoxStyle.Render("NEURAL SEARCH INTERFACE")+" "+subtleStyle.Render("v2.3"),
+		m.searchInput.View(),
+		separatorStyle.Render(strings.Repeat("─", m.width-40)),
 	)
 
-	// Split View: Results List (Left) | Detail Panel (Right)
 	var content string
-	
 	if m.searching {
-		content = m.spinner.View() + " Accessing Neural Index..."
+		content = "\n  " + m.spinner.View() + " Reconstructing visual topology..."
 	} else if m.err != nil {
-		content = lipgloss.JoinVertical(lipgloss.Left,
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#FF3333")).Render("SEARCH ERROR"),
-			"",
-			m.err.Error(),
-			"",
-			subtleStyle.Render("Note: If you recently upgraded models, you may need to re-index."),
+		content = lipgloss.NewStyle().Padding(2).Render(
+			lipgloss.JoinVertical(lipgloss.Left,
+				lipgloss.NewStyle().Foreground(errorColor).Bold(true).Render("!! CORE EXCEPTION !!"),
+				"",
+				m.err.Error(),
+			),
 		)
 	} else if len(m.results) == 0 {
-		content = subtleStyle.Render("Enter a query to search the visual dataset.\nModels will lazy-load on first search.")
+		content = "\n  " + subtleStyle.Render("Standing by for input. Models lazy-loaded on request.")
 	} else {
-		// 1. Result List
 		var rows []string
 		for i, res := range m.results {
 			style := resultPathStyle
 			prefix := "  "
 			if i == m.cursor {
 				style = selectedResultStyle
-				prefix = "> "
-			}
-			// Truncate path for list view
-			shortPath := res.Path
-			if len(shortPath) > 50 {
-				shortPath = "..." + shortPath[len(shortPath)-47:]
+				prefix = "❯ "
 			}
 			
-			line := fmt.Sprintf("%s%s %s", prefix, shortPath, resultScoreStyle.Render(fmt.Sprintf("(%.1f%%)", res.Confidence*100)))
-			rows = append(rows, style.Render(line))
-		}
-		listParams := lipgloss.NewStyle().Width(55).Height(m.height - 18) // Scrollable logically if we had a viewport, simpler for now
-		listPanel := listParams.Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
+			path := res.Path
+			if len(path) > 40 {
+				path = "..." + path[len(path)-37:]
+			}
 
-		// 2. Detail Panel (for selected item)
-		var detailPanel string
-		if len(m.results) > 0 {
-			selected := m.results[m.cursor]
-			
-			// Metadata Table
-			meta := fmt.Sprintf(
-				"Resolution:  %s\nFile Size:   %s\nModified:    %s\nReasoning:   %s",
-				selected.Resolution,
-				selected.FileSize,
-				selected.DateModified,
-				selected.Reasoning,
-			)
-			
-			detailPanel = lipgloss.JoinVertical(lipgloss.Left,
-				headerStyle.Render("IMAGE INTELLIGENCE"),
-				"",
-				lipgloss.NewStyle().Foreground(secondaryColor).Bold(true).Render(selected.Path),
-				"",
-				panelStyle.Render(meta),
-				"",
-				subtleStyle.Render("Press Enter to Open"),
-			)
+			line := fmt.Sprintf("%-42s %s", path, resultScoreStyle.Render(fmt.Sprintf("%d%%", int(res.Confidence*100))))
+			rows = append(rows, style.Render(prefix+line))
 		}
-
-		content = lipgloss.JoinHorizontal(lipgloss.Top, 
-			listPanel, 
-			panelStyle.PaddingLeft(2).Render(detailPanel),
-		)
+		content = lipgloss.JoinVertical(lipgloss.Left, rows...)
 	}
 
-	resultsPanel := panelStyle.
-		Width(m.width - 10).
-		Height(m.height - 15).
-		Render(content)
-
-	return lipgloss.JoinVertical(lipgloss.Left, input, resultsPanel)
+	return lipgloss.JoinVertical(lipgloss.Left,
+		header,
+		lipgloss.NewStyle().Height(m.height-18).Render(content),
+	)
 }
 
+
 func viewIndex(m model) string {
-	input := panelStyle.Render(
-		lipgloss.JoinVertical(lipgloss.Left,
-			headerStyle.Render("DATASET INGESTION"),
-			"Target Directory:",
-			m.pathInput.View(),
-		),
+	header := lipgloss.JoinVertical(lipgloss.Left,
+		headerBoxStyle.Render("DATASET INGESTION PIPELINE"),
+		"Target Path:",
+		m.pathInput.View(),
+		separatorStyle.Render(strings.Repeat("─", m.width-40)),
 	)
 
 	var status string
 	if m.indexing {
-        m.progress.Width = m.width - 20
+		m.progress.Width = m.width - 45
 		status = lipgloss.JoinVertical(lipgloss.Left,
+			"\n"+keywordStyle.Render("INGESTION ACTIVE"),
 			m.progress.View(),
-			logTextStyle.Render(m.indexStatus), // Use tiny info log style here too
-            "",
-			fmt.Sprintf("Processing: %d / %d", m.indexCurrent, m.indexTotal),
+			logTextStyle.Render(m.indexStatus),
+			"",
+			fmt.Sprintf("Trace: %d / %d processed", m.indexCurrent, m.indexTotal),
 		)
 	} else {
-		status = subtleStyle.Render(m.indexStatus)
+		status = "\n" + subtleStyle.Render(m.indexStatus)
 	}
 
-	statusPanel := panelStyle.
-		Width(m.width - 10).
-		Height(10).
-		Render(status)
-
-	return lipgloss.JoinVertical(lipgloss.Left, input, statusPanel)
+	return lipgloss.JoinVertical(lipgloss.Left,
+		header,
+		status,
+	)
 }
+
 
 func viewConnectDB(m model) string {
 	content := lipgloss.JoinVertical(lipgloss.Left,
@@ -831,6 +878,35 @@ func viewConnectDB(m model) string {
 	)
 	
 	return lipgloss.Place(m.width, m.height/2, lipgloss.Center, lipgloss.Center, panelStyle.Render(content))
+}
+
+func viewPro(m model) string {
+	var content strings.Builder
+	content.WriteString(headerBoxStyle.Render("PRISM PRO ACTIVATION") + "\n\n")
+
+	if m.sysInfo != nil && m.sysInfo.IsPro {
+		content.WriteString(successStyle.Render("✔ Prism Pro is Active") + "\n\n")
+		content.WriteString("Thank you for supporting Prism! You have unlocked:\n")
+		content.WriteString("• Unlimited local indexing\n")
+		content.WriteString("• Advanced S3 Ingestion (COMING SOON)\n")
+		content.WriteString("• Priority Neural Core Support\n")
+	} else {
+		content.WriteString("Unlock the full potential of your AV data.\n\n")
+		content.WriteString("Free Trial: " + keywordStyle.Render("5,000 images / session") + "\n")
+		content.WriteString("Upgrade to bypass all local processing limits.\n\n")
+		content.WriteString("Enter License Key:\n")
+		content.WriteString(m.licenseInput.View() + "\n\n")
+		
+		if m.activating {
+			content.WriteString(m.spinner.View() + " " + m.proStatus)
+		} else {
+			content.WriteString(subtleStyle.Render(m.proStatus))
+		}
+		
+		content.WriteString("\n\n" + subtleStyle.Render("Don't have a key? Visit prism.dev/upgrade"))
+	}
+
+	return lipgloss.NewStyle().Padding(1, 2).Render(content.String())
 }
 
 func max(a, b int) int {

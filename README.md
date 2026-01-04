@@ -13,6 +13,7 @@ Prism is a high-performance, terminal-based tool that brings "Google Photos" sty
 *   **Object Detection**: Context-aware indexing using YOLOv8.
 *   **Fast TUI**: A beautiful terminal interface built with Go and Bubbletea.
 *   **Vector Search**: Uses cosine similarity over high-dimensional embeddings.
+*   **Prism Pro**: Enhanced features for power users and teams (Cloud Sync, S3 Ingestion).
 
 ---
 

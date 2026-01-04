@@ -9,3 +9,4 @@ sqlalchemy
 sentencepiece
 protobuf<6.0.0dev
 psutil
+PyYAML

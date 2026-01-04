@@ -25,11 +25,33 @@ var (
 	// Main container
 	docStyle = lipgloss.NewStyle().Padding(1, 2)
 
-	// Panel Style (Bordered box with background)
+	// Panel Style (Subtle thin borders like Crush)
 	panelStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(subtleColor).
+		Border(lipgloss.NormalBorder(), false, false, false, false). // No default borders
 		Padding(0, 1)
+
+	sidebarStyle = lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder(), false, false, false, true).
+		BorderForeground(lipgloss.Color("#333333")).
+		Padding(0, 2)
+
+	separatorStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#222222")).
+		Margin(1, 0)
+        
+    // Textured background for headers
+    headerBoxStyle = lipgloss.NewStyle().
+        Foreground(lipgloss.Color("#000000")).
+        Background(primaryColor).
+        Bold(true).
+        Padding(0, 1).
+        MarginBottom(1)
+        
+    keywordStyle = lipgloss.NewStyle().
+        Foreground(accentColor).
+        Italic(true)
+        
+    asciiTexture = subtleStyle.Render(" //////////////////////////////////////////////////////// ")
 
 	// -- Text Styles --
 
@@ -45,6 +67,10 @@ var (
 
 	subtleStyle = lipgloss.NewStyle().
 		Foreground(subtleColor)
+
+	successStyle = lipgloss.NewStyle().
+		Foreground(successColor).
+		Bold(true)
 
 	// -- Specific Component Styles --
 

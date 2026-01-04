@@ -22,6 +22,7 @@ except ImportError:
 
 from database import Database
 from engine import LocalSearchEngine
+from config import config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -49,7 +50,18 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
                     files_to_process.append(os.path.join(root, file))
 
         total_files = len(files_to_process)
-        logger.info(f"Found {total_files} images to index in {root_path}")
+        
+        # Freemium Limit
+        if not config.is_pro and total_files > config.settings['max_free_images']:
+            logger.warning(f"Free version limit reached. Found {total_files} but can only index {config.settings['max_free_images']}.")
+            files_to_process = files_to_process[:config.settings['max_free_images']]
+            yield prism_pb2.IndexProgress(
+                current=0,
+                total=len(files_to_process),
+                status_message=f"NOTICE: Free version limit ({config.settings['max_free_images']} images). Upgrade to Pro for unlimited."
+            )
+
+        logger.info(f"Processing {len(files_to_process)} images in {root_path}")
 
         # 2. Processing phase
         for idx, file_path in enumerate(files_to_process, 1):
@@ -167,7 +179,8 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
                 yolo_model="YOLOv8-Medium (Lazy Loaded)" if self.engine.yolo is None else "YOLOv8-Medium (Active)",
                 backend_version="v2.3.1-stable",
                 cpu_count=os.cpu_count(),
-                memory_usage=mem_usage
+                memory_usage=mem_usage,
+                is_pro=config.is_pro
             )
         except Exception as e:
             logger.error(f"Failed to get system info: {e}")
@@ -176,8 +189,21 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
                 siglip_model="error",
                 yolo_model="error",
                 backend_version="error",
-                memory_usage="error"
+                memory_usage="error",
+                is_pro=False
             )
+
+    def ActivateLicense(self, request, context):
+        key = request.license_key
+        logger.info(f"Attempting to activate license: {key}")
+        
+        # Simple validation for demo
+        if key.startswith("PRISM-PRO-"):
+            config.settings['license_key'] = key
+            config.save()
+            return prism_pb2.ActivateLicenseResponse(success=True, message="Prism Pro Activated! Thank you for your support.")
+        else:
+            return prism_pb2.ActivateLicenseResponse(success=False, message="Invalid license key. Keys start with 'PRISM-PRO-'.")
 
     def GetStats(self, request, context):
         try:
