@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package prism;
+
+option go_package = "github.com/sjanney/prism/proto";
+
+service PrismService {
+  rpc Index(IndexRequest) returns (stream IndexProgress) {}
+  rpc Search(SearchRequest) returns (SearchResponse) {}
+  rpc OpenResult(OpenRequest) returns (OpenResponse) {}
+  rpc ConnectDatabase(ConnectDatabaseRequest) returns (ConnectDatabaseResponse) {}
+  rpc GetStats(GetStatsRequest) returns (GetStatsResponse) {}
+  rpc GetSystemInfo(GetSystemInfoRequest) returns (GetSystemInfoResponse) {}
+}
+
+message GetSystemInfoRequest {}
+
+message GetSystemInfoResponse {
+  string device = 1;
+  string siglip_model = 2;
+  string yolo_model = 3;
+  string backend_version = 4;
+  int32 cpu_count = 5;
+  string memory_usage = 6;
+}
+
+message ConnectDatabaseRequest {
+  string db_path = 1;
+}
+
+message ConnectDatabaseResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message IndexRequest {
+  string path = 1;
+}
+
+message IndexProgress {
+  int64 current = 1;
+  int64 total = 2;
+  string status_message = 3;
+}
+
+message SearchRequest {
+  string query_text = 1;
+}
+
+message SearchResult {
+  string path = 1;
+  float confidence = 2;
+  string reasoning = 3;
+  // New fields for UI details
+  string resolution = 4;
+  string date_modified = 5;
+  string file_size = 6;
+  repeated string detected_objects = 7;
+}
+
+message SearchResponse {
+  repeated SearchResult results = 1;
+}
+
+message OpenRequest {
+  string file_path = 1;
+}
+
+message OpenResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message GetStatsRequest {}
+
+message DatasetMetadata {
+  int64 total_frames = 1;
+  int64 total_embeddings = 2;
+  string last_indexed = 3;
+  string db_path = 4;
+}
+
+message GetStatsResponse {
+  DatasetMetadata metadata = 1;
+}
+
