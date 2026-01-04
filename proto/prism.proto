@@ -12,6 +12,7 @@ service PrismService {
   rpc GetStats(GetStatsRequest) returns (GetStatsResponse) {}
   rpc GetSystemInfo(GetSystemInfoRequest) returns (GetSystemInfoResponse) {}
   rpc ActivateLicense(ActivateLicenseRequest) returns (ActivateLicenseResponse) {}
+  rpc PickFolder(PickFolderRequest) returns (PickFolderResponse) {}
 }
 
 message GetSystemInfoRequest {}
@@ -93,4 +94,14 @@ message ActivateLicenseRequest {
 message ActivateLicenseResponse {
   bool success = 1;
   string message = 2;
+}
+
+message PickFolderRequest {
+  string prompt = 1;
+}
+
+message PickFolderResponse {
+  bool success = 1;
+  string path = 2;
+  string message = 3;
 }

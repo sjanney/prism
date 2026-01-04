@@ -205,6 +205,30 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
         else:
             return prism_pb2.ActivateLicenseResponse(success=False, message="Invalid license key. Keys start with 'PRISM-PRO-'.")
 
+    def PickFolder(self, request, context):
+        logger.info("Opening native folder picker...")
+        try:
+            system_platform = platform.system()
+            if system_platform == 'Darwin':
+                # macOS AppleScript
+                cmd = ["osascript", "-e", f'POSIX path of (choose folder with prompt "{request.prompt}")']
+                result = subprocess.check_output(cmd).decode('utf-8').strip()
+                return prism_pb2.PickFolderResponse(success=True, path=result)
+            elif system_platform == 'Windows':
+                # Windows PowerShell
+                ps_cmd = f"[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); $objForm = New-Object System.Windows.Forms.FolderBrowserDialog; $objForm.Description = '{request.prompt}'; if($objForm.ShowDialog() -eq 'OK') {{ $objForm.SelectedPath }}"
+                cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd]
+                result = subprocess.check_output(cmd).decode('utf-8').strip()
+                if result:
+                    return prism_pb2.PickFolderResponse(success=True, path=result)
+                else:
+                    return prism_pb2.PickFolderResponse(success=False, message="Selection cancelled")
+            else:
+                return prism_pb2.PickFolderResponse(success=False, message=f"Native picker not supported on {system_platform}")
+        except Exception as e:
+            logger.error(f"Folder picker failed: {e}")
+            return prism_pb2.PickFolderResponse(success=False, message=str(e))
+
     def GetStats(self, request, context):
         try:
             stats = self.db.get_stats()

@@ -168,11 +168,28 @@ type licenseActivatedMsg struct {
 	success bool
 	message string
 }
+type folderPickedMsg struct {
+	success bool
+	path    string
+	message string
+}
 type errMsg error
 type retryConnectMsg struct{}
 
 // -- Commands --
 // ... (existing commands same) ...
+
+func pickFolderCmd(client pb.PrismServiceClient) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second) 
+		defer cancel()
+		resp, err := client.PickFolder(ctx, &pb.PickFolderRequest{Prompt: "Select Dataset Folder"})
+		if err != nil {
+			return errMsg(err)
+		}
+		return folderPickedMsg{success: resp.Success, path: resp.Path, message: resp.Message}
+	}
+}
 
 func connectToBackendWithRetry() tea.Msg {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
@@ -443,6 +460,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
+			case "o":
+				if m.state == stateIndex && !m.indexing {
+					cmds = append(cmds, pickFolderCmd(m.client))
+				}
+
 			case "esc":
 				if m.state == stateSearch {
 					m.searchInput.Focus()
@@ -476,6 +498,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
         // If loading done but waiting for stats (rare race), we might need to handle.
         // For now, let Tick handle transition to Home when loading is 100% AND client != nil.
         
+	case folderPickedMsg:
+		if msg.success {
+			m.pathInput.SetValue(msg.path)
+		} else if msg.message != "" {
+			m.indexStatus = "Picker: " + msg.message
+		}
+
 	case licenseActivatedMsg:
 		m.activating = false
 		m.proStatus = msg.message
@@ -849,7 +878,7 @@ func viewSearch(m model) string {
 func viewIndex(m model) string {
 	header := lipgloss.JoinVertical(lipgloss.Left,
 		headerBoxStyle.Render("DATASET INGESTION PIPELINE"),
-		"Target Path:",
+		"Target Path: "+subtleStyle.Render("(Press 'o' to open folder picker)"),
 		m.pathInput.View(),
 		separatorStyle.Render(strings.Repeat("─", m.width-40)),
 	)

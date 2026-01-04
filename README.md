@@ -11,6 +11,7 @@ Prism is a high-performance, terminal-based tool that brings "Google Photos" sty
 *   **Semantic Search**: Query your data with natural language (e.g., "red car under street light").
 *   **Local-First**: No data ever leaves your machine. Everything runs on your metal.
 *   **Object Detection**: Context-aware indexing using YOLOv8.
+*   **Native File Picker**: Open a real folder dialog from the TUI (macOS/Windows).
 *   **Vector Search**: Uses cosine similarity over high-dimensional embeddings.
 *   **Prism Pro**: Enhanced features for power users and teams:
     *   **Unlimited Indexing**: Bypass the 5,000 image local limit.
