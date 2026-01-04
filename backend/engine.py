@@ -57,57 +57,116 @@ class LocalSearchEngine:
             text_features = text_features / text_features.norm(p=2, dim=-1, keepdim=True)
             return text_features.cpu().numpy()[0]
 
-    def process_image(self, file_path: str):
-        self._load_yolo() # Ensure loaded
-        self._load_siglip() # Ensure loaded
+    def compute_batch_embeddings(self, images: list[Image.Image]) -> list[np.ndarray]:
+        """Compute embeddings for a batch of images in one pass."""
+        self._load_siglip()
         
-        try:
-            image = Image.open(file_path)
-            width, height = image.size
-            embeddings = []
+        # Ensure RGB
+        clean_images = []
+        for img in images:
+            if img.mode != "RGB":
+                clean_images.append(img.convert("RGB"))
+            else:
+                clean_images.append(img)
 
-            # 1. Global embedding
-            global_emb = self.compute_embedding(image)
-            embeddings.append({
-                "type": "full_image",
-                "class": None,
-                "bbox": None,
-                "embedding": global_emb
-            })
+        if not clean_images:
+            return []
 
-            # 2. Run YOLO
-            results = self.yolo(image, verbose=False) 
+        with torch.no_grad():
+            inputs = self.processor(images=clean_images, return_tensors="pt", padding=True).to(self.device)
+            image_features = self.model.get_image_features(**inputs)
+            image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
+            return list(image_features.cpu().numpy())
 
-            for result in results:
-                boxes = result.boxes
-                for box in boxes:
-                    cls_id = int(box.cls[0].item())
-                    if cls_id in self.target_classes:
-                        # Extract crop
-                        xyxy = box.xyxy[0].cpu().numpy()
-                        x1, y1, x2, y2 = map(int, xyxy)
-                        x1, y1 = max(0, x1), max(0, y1)
-                        x2, y2 = min(width, x2), min(height, y2)
-                        
-                        if x2 - x1 < 10 or y2 - y1 < 10: 
-                            continue
+    def process_batch(self, file_paths: list[str]):
+        """Process a batch of images efficiently."""
+        self._load_yolo()
+        self._load_siglip()
+        
+        results = []
+        
+        # 1. Load all images
+        images = []
+        valid_paths = []
+        for path in file_paths:
+            try:
+                img = Image.open(path)
+                images.append(img)
+                valid_paths.append(path)
+            except Exception as e:
+                logger.error(f"Error loading {path}: {e}")
 
-                        crop = image.crop((x1, y1, x2, y2))
-                        crop_emb = self.compute_embedding(crop)
-                        
-                        class_name = self.yolo.names[cls_id]
-                        embeddings.append({
-                            "type": "object_crop",
-                            "class": class_name,
-                            "bbox": [x1, y1, x2, y2],
-                            "embedding": crop_emb
-                        })
+        if not images:
+            return []
+
+        # 2. Batch Global Embeddings (SigLIP)
+        global_embs = self.compute_batch_embeddings(images)
+
+        # 3. Batch Object Detection (YOLO)
+        # YOLOv8 handles batch inference natively
+        yolo_results = self.yolo(images, verbose=False, stream=False)
+
+        # 4. Process Detections & Collect Crops
+        all_crops = []
+        crop_metadata = [] # (image_index, class_name, bbox)
+
+        for i, result in enumerate(yolo_results):
+            width, height = images[i].size
             
-            return width, height, embeddings
+            # Start result entry
+            image_result = {
+                "path": valid_paths[i],
+                "width": width,
+                "height": height,
+                "embeddings": [{
+                    "type": "full_image",
+                    "class": None,
+                    "bbox": None,
+                    "embedding": global_embs[i]
+                }]
+            }
+            results.append(image_result)
 
-        except Exception as e:
-            logger.error(f"Error processing image {file_path}: {e}")
-            return 0, 0, []
+            # Collect crops
+            for box in result.boxes:
+                cls_id = int(box.cls[0].item())
+                if cls_id in self.target_classes:
+                    xyxy = box.xyxy[0].cpu().numpy()
+                    x1, y1, x2, y2 = map(int, xyxy)
+                    x1, y1 = max(0, x1), max(0, y1)
+                    x2, y2 = min(width, x2), min(height, y2)
+                    
+                    if x2 - x1 < 10 or y2 - y1 < 10: 
+                        continue
+
+                    crop = images[i].crop((x1, y1, x2, y2))
+                    all_crops.append(crop)
+                    crop_metadata.append({
+                        "img_idx": i,
+                        "class": self.yolo.names[cls_id],
+                        "bbox": [x1, y1, x2, y2]
+                    })
+
+        # 5. Batch Crop Embeddings (SigLIP)
+        if all_crops:
+            # Process crops in sub-batches if too many
+            crop_embs = []
+            chunk_size = 32 # Safety limit for crop batches
+            for k in range(0, len(all_crops), chunk_size):
+                chunk = all_crops[k:k+chunk_size]
+                crop_embs.extend(self.compute_batch_embeddings(chunk))
+            
+            # Assign back to results
+            for j, meta in enumerate(crop_metadata):
+                img_idx = meta["img_idx"]
+                results[img_idx]["embeddings"].append({
+                    "type": "object_crop",
+                    "class": meta["class"],
+                    "bbox": meta["bbox"],
+                    "embedding": crop_embs[j]
+                })
+
+        return results
 
     def search(self, text_query: str, db_connection):
         # 1. Text embedding

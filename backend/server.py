@@ -69,29 +69,42 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
             context.set_details(f"[PSM-4002] No images found in: {root_path}")
             return
 
-        # 2. Processing phase
-        for idx, file_path in enumerate(files_to_process, 1):
-            try:
-                # Process image to get list of embeddings (global + crops)
-                # Now returns (width, height, embeddings)
-                width, height, embeddings = self.engine.process_image(file_path)
-                
-                # Save each embedding to DB
-                if embeddings:
-                    self.db.save_frame_and_embeddings(file_path, width, height, embeddings)
-                    self.engine.invalidate_cache()  # Ensure new data is searchable
+        # 2. Batch Processing phase
+        BATCH_SIZE = 8
+        processed_count = 0
 
-                yield prism_pb2.IndexProgress(
-                    current=idx,
-                    total=total_files,
-                    status_message=f"Indexed {os.path.basename(file_path)}"
-                )
+        for i in range(0, len(files_to_process), BATCH_SIZE):
+            batch_files = files_to_process[i : i + BATCH_SIZE]
+            
+            try:
+                # Returns list of dicts: {path, width, height, embeddings}
+                batch_results = self.engine.process_batch(batch_files)
+                
+                for res in batch_results:
+                    if res.get("embeddings"):
+                        self.db.save_frame_and_embeddings(
+                            res["path"], 
+                            res["width"], 
+                            res["height"], 
+                            res["embeddings"]
+                        )
+                    processed_count += 1
+                    
+                    yield prism_pb2.IndexProgress(
+                        current=processed_count,
+                        total=total_files,
+                        status_message=f"Indexed {os.path.basename(res['path'])}"
+                    )
+                
+                # Invalidate cache periodically, or at end
+                self.engine.invalidate_cache()
+
             except Exception as e:
-                logger.error(f"Failed to process {file_path}: {e}")
+                logger.error(f"Batch processing failed: {e}")
                 yield prism_pb2.IndexProgress(
-                    current=idx,
+                    current=processed_count,
                     total=total_files,
-                    status_message=f"Error: {str(e)}"
+                    status_message=f"Batch Error: {str(e)}"
                 )
 
     def Search(self, request, context):
