@@ -59,6 +59,13 @@ coverage/
 *.sqlite3
 *.db
 
+# Dataset & Cache
+data/
+.prism/
+.edgevlm/
+edgevlm.db
+prism.db
+
 # Logs
 logs/
 *.log
