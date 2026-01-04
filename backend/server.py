@@ -73,6 +73,7 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
                 # Save each embedding to DB
                 if embeddings:
                     self.db.save_frame_and_embeddings(file_path, width, height, embeddings)
+                    self.engine.invalidate_cache()  # Ensure new data is searchable
 
                 yield prism_pb2.IndexProgress(
                     current=idx,

@@ -111,8 +111,16 @@ class LocalSearchEngine:
         # 1. Text embedding
         query_emb = self.compute_text_embedding(text_query)
 
-        # 2. Get all embeddings
-        stored_items = db_connection.get_all_embeddings()
+        # 2. Get all embeddings (with caching)
+        if not hasattr(self, '_embedding_cache') or self._embedding_cache is None:
+            logger.info("Loading embeddings into cache...")
+            self._embedding_cache = db_connection.get_all_embeddings()
+            if self._embedding_cache:
+                self._emb_matrix = np.stack([item['embedding'] for item in self._embedding_cache])
+            else:
+                self._emb_matrix = None
+        
+        stored_items = self._embedding_cache
 
         if not stored_items:
             return []
@@ -126,8 +134,7 @@ class LocalSearchEngine:
              )
 
         # 3. Vectorized Cosine Similarity (SPEED INCREASE)
-        all_embs = np.stack([item['embedding'] for item in stored_items])
-        dot_products = np.dot(all_embs, query_emb)
+        dot_products = np.dot(self._emb_matrix, query_emb)
 
         scores = []
         for i, item in enumerate(stored_items):
@@ -143,3 +150,8 @@ class LocalSearchEngine:
         # 4. Sort and return top 20
         scores.sort(key=lambda x: x["confidence"], reverse=True)
         return scores[:20]
+
+    def invalidate_cache(self):
+        """Call after indexing to ensure next search reloads."""
+        self._embedding_cache = None
+        self._emb_matrix = None
