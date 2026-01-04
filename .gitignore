@@ -97,3 +97,4 @@ env/
 # Generated gRPC code
 frontend/proto/*.go
 backend/*_pb2*.py
+prism.db.bak

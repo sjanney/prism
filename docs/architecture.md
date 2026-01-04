@@ -5,19 +5,19 @@ This document explains how Prism works under the hood.
 ## High-Level Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Prism TUI (Go)                          │
-│   [Dashboard] [Search] [Index] [Settings] [Pro]                 │
-└────────────────────────────┬────────────────────────────────────┘
-                             │ gRPC (localhost:50051)
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Prism Backend (Python)                      │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │   YOLOv8    │  │   SigLIP    │  │      SQLite + Numpy     │  │
-│  │  Detection  │  │  Embeddings │  │      Vector Storage     │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
++------------------------------------------------------------------+
+|                         Prism TUI (Go)                           |
+|   [Dashboard] [Search] [Index] [Settings] [Pro]                  |
++--------------------------------+---------------------------------+
+                                 | gRPC (localhost:50051)
+                                 v
++------------------------------------------------------------------+
+|                      Prism Backend (Python)                       |
+|  +--------------+  +--------------+  +--------------------------+ |
+|  |   YOLOv8     |  |   SigLIP     |  |      SQLite + Numpy      | |
+|  |  Detection   |  |  Embeddings  |  |      Vector Storage      | |
+|  +--------------+  +--------------+  +--------------------------+ |
++------------------------------------------------------------------+
 ```
 
 ## Components
@@ -47,6 +47,7 @@ The Python backend handles all AI inference:
 | `engine.py` | YOLOv8 + SigLIP inference, search logic |
 | `database.py` | SQLite operations, embedding storage |
 | `config.py` | Configuration management, Pro license |
+| `errors.py` | Structured error codes |
 
 ### 3. Communication (gRPC)
 
@@ -73,7 +74,7 @@ The frontend and backend communicate via gRPC. Key RPCs:
 1. User selects folder
 2. Backend walks directory, finds images
 3. For each image:
-   a. Run YOLOv8 → detect objects
+   a. Run YOLOv8 -> detect objects
    b. Compute SigLIP embedding (full image)
    c. Compute SigLIP embedding (each detected crop)
    d. Store embeddings in SQLite as numpy blobs

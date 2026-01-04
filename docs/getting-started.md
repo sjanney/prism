@@ -51,7 +51,7 @@ You should see the Prism loading screen, followed by the main dashboard.
 
 ## First Index
 
-1. Navigate to **Index New Data** using `↓` arrow keys.
+1. Navigate to **Index New Data** using the arrow keys.
 2. Press **Enter**.
 3. Press **`o`** to open the native folder picker, or type a path manually.
 4. Press **Enter** to begin indexing.
@@ -65,7 +65,7 @@ You should see the Prism loading screen, followed by the main dashboard.
 1. After indexing, press **Tab** to go to the **Search** tab.
 2. Type a query like `red car` or `person crossing street`.
 3. Press **Enter**.
-4. Use `↑`/`↓` to navigate results, **Enter** to open the file in your default viewer.
+4. Use arrow keys to navigate results, **Enter** to open the file in your default viewer.
 
 ---
 

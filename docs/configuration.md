@@ -78,7 +78,7 @@ Force a specific compute device:
 
 | Value | Description |
 |-------|-------------|
-| `auto` | Auto-detect (CUDA → MPS → CPU) |
+| `auto` | Auto-detect (CUDA -> MPS -> CPU) |
 | `cuda` | Force NVIDIA GPU |
 | `mps` | Force Apple Metal |
 | `cpu` | Force CPU (slow but always works) |

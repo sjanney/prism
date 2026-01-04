@@ -1,8 +1,8 @@
-# Contributing to Prism 🌈
+# Contributing to Prism
 
 First off, thank you for considering contributing to Prism! It's people like you that make Prism such a great tool.
 
-## 🚀 How Can I Contribute?
+## How Can I Contribute?
 
 ### Reporting Bugs
 *   Check the [Issues](https://github.com/sjanney/prism/issues) to see if the bug has already been reported.
@@ -19,7 +19,7 @@ First off, thank you for considering contributing to Prism! It's people like you
 4.  Ensure the test suite passes.
 5.  Make sure your code lints.
 
-## 🛠 Development Environment
+## Development Environment
 
 1.  **Backend**: Python 3.9+ with PyTorch.
 2.  **Frontend**: Go 1.21+.
@@ -31,5 +31,5 @@ make build
 ./run_prism.sh
 ```
 
-## 📜 License
+## License
 By contributing, you agree that your contributions will be licensed under its Apache 2.0 License.
