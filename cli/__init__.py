@@ -1,0 +1,2 @@
+"""EdgeVLM CLI package."""
+
