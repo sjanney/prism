@@ -1,0 +1,11 @@
+grpcio
+grpcio-tools
+torch
+transformers
+ultralytics
+Pillow
+numpy
+sqlalchemy
+sentencepiece
+protobuf<6.0.0dev
+psutil

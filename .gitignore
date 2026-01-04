@@ -56,13 +56,44 @@ coverage/
 *.swo
 
 # Databases
+*.db
 *.sqlite3
+*.db.old
 
-# Dataset & Cache
-.prism/
-.edgevlm/
-edgevlm.db
+# Models
+*.pt
+*.pth
+*.onnx
+
+# Go Binaries & Tests
+**/prism
+**/prism_app
+**/prism_test*
+**/prism_v*
+prism_app
+prism_test_build*
+frontend/prism*
+backend/prism*
 
 # Logs
 logs/
 *.log
+prism/backend.log
+
+# Datasets
+data/
+v1.0-trainval*
+blobs/
+
+# Python
+**/__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.env
+
+# Generated gRPC code
+frontend/proto/*.go
+backend/*_pb2*.py
