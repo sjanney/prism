@@ -74,16 +74,18 @@ var (
 
 	// -- Specific Component Styles --
 
-	// Banner
 	bannerTxt = `
- ________  ________  ___  ________  _____ ______      
-|\   __  \|\   __  \|\  \|\   ____\|\   _ \  _   \    
-\ \  \|\  \ \  \|\  \ \  \ \  \___|\ \  \\\__\ \  \   
- \ \   ____\ \   _  _\ \  \ \_____  \ \  \\|__| \  \  
-  \ \  \___|\ \  \\  \\ \  \|____|\  \ \  \    \ \  \ 
-   \ \__\    \ \__\\ _\\ \__\____\_\  \ \__\    \ \__\
-    \|__|     \|__|\|__|\|__|\_________\|__|     \|__|
-                            \|_________|`
+                    $$\                         
+                    \__|                        
+ $$$$$$\   $$$$$$\  $$\  $$$$$$$\ $$$$$$\$$$$\  
+$$  __$$\ $$  __$$\ $$ |$$  _____|$$  _$$  _$$\ 
+$$ /  $$ |$$ |  \__|$$ | \$$$$$$\  $$ / $$ / $$ |
+$$ |  $$ |$$ |      $$ |  \____$$\ $$ | $$ | $$ |
+$$$$$$$  |$$ |      $$ | $$$$$$$  |$$ | $$ | $$ |
+$$  ____/ \__|      \__| \_______/ \__| \__| \__|
+$$ |                                            
+$$ |                                            
+\__|                                            `
 
 	// Stats
 	statLabelStyle = lipgloss.NewStyle().
@@ -174,35 +176,39 @@ var (
 			BorderBottom(true)
 )
 
-// RenderGradientBanner renders the banner with a vertical gradient
+// RenderGradientBanner renders the banner with a diagonal gradient
 func RenderGradientBanner() string {
 	lines := strings.Split(bannerTxt, "\n")
 	var out strings.Builder
 
-	// Gradient colors: Purple Spectrum
-	c1, _ := colorful.Hex("#4B0082") // Indigo
-	c2, _ := colorful.Hex("#7D00FF") // Electric Purple
-	c3, _ := colorful.Hex("#E0B0FF") // Mauve
+	// Shimmering Palette
+	c1, _ := colorful.Hex("#00E5FF") // Electric Blue
+	c2, _ := colorful.Hex("#7D00FF") // Deep Indigo
+	c3, _ := colorful.Hex("#FF00FF") // Neon Magenta
 
-	for i, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			out.WriteString(line + "\n")
+	for y, line := range lines {
+		if strings.TrimSpace(line) == "" && y == 0 {
 			continue
 		}
+		
+		for x, char := range line {
+			// Diagonal T (sum of X and Y normalized)
+			// Adjust multipliers to stretch/shrink gradient
+			normX := float64(x) / 40.0 
+			normY := float64(y) / float64(len(lines))
+			t := (normX + normY) / 2.0
 
-		// Calculate gradient position (0.0 to 1.0)
-		t := float64(i) / float64(len(lines)-1)
-		var c colorful.Color
-		if t < 0.5 {
-			// First half: Indigo -> Electric Purple
-			c = c1.BlendLuv(c2, t*2)
-		} else {
-			// Second half: Electric Purple -> Mauve
-			c = c2.BlendLuv(c3, (t-0.5)*2)
+			var c colorful.Color
+			if t < 0.5 {
+				c = c1.BlendLuv(c2, t*2)
+			} else {
+				c = c2.BlendLuv(c3, (t-0.5)*2)
+			}
+
+			style := lipgloss.NewStyle().Foreground(lipgloss.Color(c.Hex())).Bold(true)
+			out.WriteString(style.Render(string(char)))
 		}
-
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color(c.Hex())).Bold(true)
-		out.WriteString(style.Render(line) + "\n")
+		out.WriteString("\n")
 	}
 	return out.String()
 }

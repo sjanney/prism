@@ -109,7 +109,7 @@ func initialModel() model {
 
 	return model{
 		state:            stateLoading,
-		dashboardOptions: []string{"Search Dataset", "Index New Data", "Connect Database", "Upgrade to Pro", "Quit"},
+		dashboardOptions: []string{"Search Dataset", "Index New Data", "Cloud Ingestion (S3)", "Connect Database", "Upgrade to Pro", "Quit"},
 		dashboardCursor:  0,
 		searchInput:      si,
 		pathInput:        pi,
@@ -401,6 +401,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					case "Index New Data":
 						m.state = stateIndex
 						m.pathInput.Focus()
+					case "Cloud Ingestion (S3)":
+						if m.sysInfo != nil && m.sysInfo.IsPro {
+							// Logic for S3
+							m.indexStatus = "S3 Ingestion Module Loading..."
+						} else {
+							m.state = statePro
+							m.proStatus = "Cloud Ingestion is a Prism Pro feature."
+						}
 					case "Connect Database":
 						m.state = stateConnectDB
 						m.dbInput.Focus()

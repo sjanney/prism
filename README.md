@@ -11,9 +11,12 @@ Prism is a high-performance, terminal-based tool that brings "Google Photos" sty
 *   **Semantic Search**: Query your data with natural language (e.g., "red car under street light").
 *   **Local-First**: No data ever leaves your machine. Everything runs on your metal.
 *   **Object Detection**: Context-aware indexing using YOLOv8.
-*   **Fast TUI**: A beautiful terminal interface built with Go and Bubbletea.
 *   **Vector Search**: Uses cosine similarity over high-dimensional embeddings.
-*   **Prism Pro**: Enhanced features for power users and teams (Cloud Sync, S3 Ingestion).
+*   **Prism Pro**: Enhanced features for power users and teams:
+    *   **Unlimited Indexing**: Bypass the 5,000 image local limit.
+    *   **Cloud Ingestion**: Index directly from S3/GCP/Azure without local downloads.
+    *   **Remote Core**: Connect the TUI to a remote GPU server for high-speed indexing.
+    *   **Advanced Export**: Export search results to YOLO/COCO datasets for re-training.
 
 ---
 
