@@ -5,6 +5,8 @@ from ultralytics import YOLO
 import numpy as np
 import logging
 
+from errors import DimensionMismatchError, ModelLoadingError
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -110,11 +112,22 @@ class LocalSearchEngine:
     def search(self, text_query: str, db_connection):
         # 1. Text embedding
         query_emb = self.compute_text_embedding(text_query)
+        expected_dim = query_emb.shape[0]
 
         # 2. Get all embeddings (with caching)
         if not hasattr(self, '_embedding_cache') or self._embedding_cache is None:
             logger.info("Loading embeddings into cache...")
-            self._embedding_cache = db_connection.get_all_embeddings()
+            all_items = db_connection.get_all_embeddings()
+            
+            # Filter only embeddings with correct dimension
+            self._embedding_cache = [
+                item for item in all_items 
+                if item['embedding'].shape[0] == expected_dim
+            ]
+            
+            if len(self._embedding_cache) != len(all_items):
+                logger.warning(f"Filtered out {len(all_items) - len(self._embedding_cache)} embeddings with wrong dimensions.")
+            
             if self._embedding_cache:
                 self._emb_matrix = np.stack([item['embedding'] for item in self._embedding_cache])
             else:
@@ -127,10 +140,9 @@ class LocalSearchEngine:
 
         # Check dimension mismatch
         if stored_items and stored_items[0]['embedding'].shape != query_emb.shape:
-             raise ValueError(
-                 f"Model dimension mismatch! Current model uses {query_emb.shape[0]}d vectors, "
-                 f"but index has {stored_items[0]['embedding'].shape[0]}d vectors. "
-                 "Please delete 'prism.db' and re-index your data."
+             raise DimensionMismatchError(
+                 expected=query_emb.shape[0],
+                 actual=stored_items[0]['embedding'].shape[0]
              )
 
         # 3. Vectorized Cosine Similarity (SPEED INCREASE)

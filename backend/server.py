@@ -23,6 +23,7 @@ except ImportError:
 from database import Database
 from engine import LocalSearchEngine
 from config import config
+from errors import PathNotFoundError, NoImagesFoundError, FreeLimitReachedError
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -37,7 +38,7 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
         root_path = request.path
         if not os.path.exists(root_path):
             context.set_code(grpc.StatusCode.NOT_FOUND)
-            context.set_details(f"Path not found: {root_path}")
+            context.set_details(f"[PSM-4001] Path not found: {root_path}")
             return
 
         image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'}
@@ -62,6 +63,11 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
             )
 
         logger.info(f"Processing {len(files_to_process)} images in {root_path}")
+        
+        if len(files_to_process) == 0:
+            context.set_code(grpc.StatusCode.NOT_FOUND)
+            context.set_details(f"[PSM-4002] No images found in: {root_path}")
+            return
 
         # 2. Processing phase
         for idx, file_path in enumerate(files_to_process, 1):

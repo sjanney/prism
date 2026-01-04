@@ -1,23 +1,58 @@
-# 🌈 Prism
+<p align="center">
+  <img src="assets/prism_screenshot.png" alt="Prism TUI Screenshot" width="800"/>
+</p>
 
-### Semantic Search for Local Datasets (YOLO + SigLIP)
+<h1 align="center">🌈 Prism</h1>
+<p align="center">
+  <strong>Semantic Search for Local Image Datasets</strong><br>
+  <em>Find anything in your data with natural language. No cloud. No limits.</em>
+</p>
 
-Prism is a high-performance, terminal-based tool that brings "Google Photos" style search to your local image datasets. It indexes your folders, detects objects (Cars, Pedestrians, Traffic Lights) using **YOLOv8**, and generates rich semantic embeddings with **SigLIP**.
+<p align="center">
+  <a href="#-quick-start">Quick Start</a> •
+  <a href="#-features">Features</a> •
+  <a href="#-documentation">Docs</a> •
+  <a href="#-prism-pro">Pro</a> •
+  <a href="#-contributing">Contributing</a>
+</p>
 
-![Prism Banner](https://via.placeholder.com/800x200?text=Prism+Search)
+---
+
+## 🎯 What is Prism?
+
+Prism is a **local-first, privacy-preserving** semantic search engine for image datasets. It's designed for engineers working with autonomous vehicles, robotics, and computer vision who need to find specific frames in terabytes of data—without uploading anything to the cloud.
+
+**Think "Google Photos search" for your raw sensor data.**
+
+Instead of manually tagging or grepping through logs, just type:
+> *"red car turning left at intersection"*
+
+Prism uses state-of-the-art vision models (YOLOv8 + Google SigLIP) running **entirely on your machine** to understand and search your images.
+
+---
 
 ## ✨ Features
 
-*   **Semantic Search**: Query your data with natural language (e.g., "red car under street light").
-*   **Local-First**: No data ever leaves your machine. Everything runs on your metal.
-*   **Object Detection**: Context-aware indexing using YOLOv8.
-*   **Native File Picker**: Open a real folder dialog from the TUI (macOS/Windows).
-*   **Vector Search**: Uses cosine similarity over high-dimensional embeddings.
-*   **Prism Pro**: Enhanced features for power users and teams:
-    *   **Unlimited Indexing**: Bypass the 5,000 image local limit.
-    *   **Cloud Ingestion**: Index directly from S3/GCP/Azure without local downloads.
-    *   **Remote Core**: Connect the TUI to a remote GPU server for high-speed indexing.
-    *   **Advanced Export**: Export search results to YOLO/COCO datasets for re-training.
+| Feature | Description |
+|---------|-------------|
+| 🔍 **Semantic Search** | Query with natural language like "pedestrian with umbrella" |
+| 🏠 **Local-First** | All processing on your machine. Your data never leaves. |
+| 🎯 **Object Detection** | YOLOv8-powered detection for context-aware indexing |
+| ⚡ **GPU Accelerated** | Supports CUDA, Apple MPS, and CPU fallback |
+| 🖥️ **Beautiful TUI** | A stunning terminal interface built with [Bubbletea](https://github.com/charmbracelet/bubbletea) |
+| 📂 **Native File Picker** | Open a real folder dialog from the terminal (macOS/Windows) |
+| 🔌 **gRPC API** | Integrate Prism into your own tools and pipelines |
+
+### 💎 Prism Pro
+
+Unlock advanced features for teams and power users:
+
+| Pro Feature | Description |
+|-------------|-------------|
+| ♾️ **Unlimited Indexing** | Bypass the 5,000 image free limit |
+| ☁️ **Cloud Ingestion** | Index directly from S3/GCP/Azure buckets |
+| 🖧 **Remote Core** | Connect the TUI to a remote GPU server |
+| 📤 **Advanced Export** | Export search results to YOLO/COCO format |
 
 ---
 
@@ -25,58 +60,80 @@ Prism is a high-performance, terminal-based tool that brings "Google Photos" sty
 
 ### Prerequisites
 
-*   **Python 3.9+** (GPU recommended for indexing)
+*   **Python 3.9+** (GPU recommended)
 *   **Go 1.21+**
-*   **Protoc** (for code generation)
+*   **Protoc** (Protocol Buffer Compiler)
 
 ### Installation
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/sjanney/prism.git
-   cd prism
-   ```
-
-2. **Install Dependencies**
-   ```bash
-   make install
-   ```
-
-3. **Build & Run**
-   ```bash
-   make build
-   ./run_prism.sh
-   ```
-
-## 📦 Distribution
-
-### Homebrew (Coming Soon)
-We are working on bringing Prism to the official Homebrew core. For now, you can install it via our tap:
 ```bash
-brew install sjanney/tap/prism
-```
+# 1. Clone the repository
+git clone https://github.com/sjanney/prism.git
+cd prism
 
-### Manual Installation
-You can move the built binary and scripts to your `/usr/local/bin`:
-```bash
+# 2. Install dependencies
+make install
+
+# 3. Build & Run
 make build
-cp prism_app /usr/local/bin/prism
+./run_prism.sh
 ```
 
-## 💡 Why Prism?
+### First Steps
 
-In the world of autonomous vehicles and robotics, we deal with petabytes of data. Traditional tools for exploring this data are either:
-1.  **Cloud-based**: Slow, expensive, and require privacy-breaking uploads.
-2.  **Greppable Metadata**: Limited to what's already tagged.
+1.  Navigate to **Index New Data** using arrow keys.
+2.  Press **`o`** to open the native folder picker, or type a path.
+3.  Press **Enter** to start indexing.
+4.  Once complete, go to **Search** and type your query!
 
-Prism allows you to find "un-tagged" edge cases like *"a dog crossing the road in the rain"* by understanding the visual content of every frame.
+---
+
+## 📚 Documentation
+
+Full documentation is available in the [`docs/`](docs/) folder:
+
+| Document | Description |
+|----------|-------------|
+| [Getting Started](docs/getting-started.md) | Installation and first run |
+| [Architecture](docs/architecture.md) | How Prism works under the hood |
+| [Configuration](docs/configuration.md) | Customizing Prism's behavior |
+| [Error Codes](docs/error-codes.md) | Troubleshooting common issues |
+| [API Reference](docs/api-reference.md) | gRPC API for integrations |
+
+---
 
 ## 🛠️ Tech Stack
 
-- **TUI Frontend**: [Go](https://go.dev/) + [Bubbletea](https://github.com/charmbracelet/bubbletea)
-- **AI Backend**: [Python](https://www.python.org/) + [PyTorch](https://pytorch.org/)
-- **Communication**: [gRPC](https://grpc.io/)
-- **Models**: YOLOv8 (Detection) + Google SigLIP (Embeddings)
+*   **TUI Frontend**: [Go](https://go.dev/) + [Bubbletea](https://github.com/charmbracelet/bubbletea) + [Lipgloss](https://github.com/charmbracelet/lipgloss)
+*   **AI Backend**: [Python](https://www.python.org/) + [PyTorch](https://pytorch.org/)
+*   **Communication**: [gRPC](https://grpc.io/) + Protocol Buffers
+*   **Models**:
+    *   [YOLOv8](https://github.com/ultralytics/ultralytics) (Object Detection)
+    *   [Google SigLIP](https://huggingface.co/google/siglip-so400m-patch14-384) (Semantic Embeddings)
+*   **Storage**: SQLite + NumPy Vector Blobs
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+```bash
+# Run tests
+make test
+
+# Format code
+make fmt
+```
+
+---
 
 ## 📄 License
-MIT License. See [LICENSE](LICENSE) for details.
+
+Apache 2.0 License. See [LICENSE](LICENSE) for details.
+
+---
+
+<p align="center">
+  <sub>Built with ❤️ by <a href="https://github.com/sjanney">Shane Janney</a></sub>
+</p>
