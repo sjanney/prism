@@ -232,6 +232,8 @@ class LocalSearchEngine:
         
         # 4. Sort indices by score descending
         # argsort gives ascending, so we reverse
+        # Pagination support: return top 1000 instead of 20
+        limit = 1000 
         top_indices = np.argsort(scores)[::-1][:limit]
         
         top_ids = [self._emb_ids[i] for i in top_indices]

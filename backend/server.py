@@ -49,7 +49,7 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
         if not ingestor:
             if root_path.startswith("s3://") or root_path.startswith("gs://"):
                  context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-                 context.set_details(f"[PSM-4003] Cloud ingestion requires Prism Pro. Upgrade to enable S3/GCP support.")
+                 context.set_details(f"[PSM-5003] Cloud ingestion requires Prism Pro. Upgrade to enable S3/GCP support.")
                  return
             
             context.set_code(grpc.StatusCode.NOT_FOUND)

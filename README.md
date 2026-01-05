@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="assets/prism_screenshot.png" alt="Prism TUI Screenshot" width="800"/>
+  <img src="assets/tui_dashboard.png" alt="Prism Dashboard" width="800"/>
+</p>
+<p align="center">
+  <img src="assets/tui_search.png" alt="Prism Search" width="395"/>
+  <img src="assets/tui_index.png" alt="Prism Indexing" width="395"/>
 </p>
 
 <h1 align="center">Prism</h1>

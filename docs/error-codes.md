@@ -200,6 +200,19 @@ All Prism error codes follow the format: `PSM-XXXX`
 
 ---
 
+### PSM-5003: Pro Feature Required
+
+**Message:** `Cloud ingestion requires Prism Pro. Upgrade to enable S3/GCP support.`
+
+**Cause:** You are trying to use a feature/protocol (like `s3://` or `gs://`) that requires the standard Pro plugin.
+
+**Solutions:**
+1. Upgrade to Prism Pro.
+2. Install the `prism-pro` plugin package.
+
+
+---
+
 ## Still Having Issues?
 
 1. Check `backend.log` for detailed Python errors.

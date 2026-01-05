@@ -65,7 +65,9 @@ You should see the Prism loading screen, followed by the main dashboard.
 1. After indexing, press **Tab** to go to the **Search** tab.
 2. Type a query like `red car` or `person crossing street`.
 3. Press **Enter**.
-4. Use arrow keys to navigate results, **Enter** to open the file in your default viewer.
+4. Use **Up/Down** arrows to navigate results on the current page.
+5. Use **Left/Right** arrows (`h`/`l`) to switch result pages (if more than 15 results).
+6. Press **Enter** to open the file in your default viewer.
 
 ---
 

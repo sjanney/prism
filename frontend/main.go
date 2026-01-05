@@ -57,6 +57,7 @@ type model struct {
 	searchInput textinput.Model
 	results     []*pb.SearchResult
 	cursor      int
+	page        int
 	searching   bool
 
 	// Global Spinner
@@ -296,7 +297,7 @@ func openImageCmd(client pb.PrismServiceClient, path string) tea.Cmd {
 			return errMsg(err)
 		}
 		if !resp.Success {
-			return errMsg(fmt.Errorf(resp.Message))
+			return errMsg(fmt.Errorf("%s", resp.Message))
 		}
 		return openResultMsg("Opened " + path)
 	}
@@ -404,8 +405,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.dashboardCursor++
 					}
 				} else if m.state == stateSearch && !m.searchInput.Focused() {
-					if m.cursor < len(m.results)-1 {
+					// Pagination Check: cursor assumes strictly within current page
+					// We calculate limit based on page size later, but for cursor movement we just clamp to page size
+					// Actually, let's keep cursor relative to the page (0-14)
+					if m.cursor < 14 && (m.page*15+m.cursor+1 < len(m.results)) {
 						m.cursor++
+					}
+				}
+
+			case "left", "h":
+				if m.state == stateSearch && !m.searchInput.Focused() && m.page > 0 {
+					m.page--
+					m.cursor = 0
+				}
+
+			case "right", "l":
+				if m.state == stateSearch && !m.searchInput.Focused() {
+					pageSize := 15
+					if (m.page+1)*pageSize < len(m.results) {
+						m.page++
+						m.cursor = 0
 					}
 				}
 
@@ -447,7 +466,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.dbStatus = "Connecting..."
 				} else if m.state == stateSearch {
 					if !m.searchInput.Focused() && len(m.results) > 0 {
-						cmds = append(cmds, openImageCmd(m.client, m.results[m.cursor].Path))
+						// Resolve absolute index
+						absIdx := m.page*15 + m.cursor
+						if absIdx < len(m.results) {
+							cmds = append(cmds, openImageCmd(m.client, m.results[absIdx].Path))
+						}
 					} else {
 						m.searchInput.Blur()
 						m.results = nil
@@ -546,6 +569,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.searching = false
 		m.results = msg
 		m.cursor = 0
+		m.page = 0
 		if len(m.results) > 0 {
 			m.searchInput.Blur()
 		} else {
@@ -848,7 +872,22 @@ func viewSearch(m model) string {
 		content = "\n  " + subtleStyle.Render("Standing by for input. Models lazy-loaded on request.")
 	} else {
 		var rows []string
-		for i, res := range m.results {
+
+		pageSize := 15
+		start := m.page * pageSize
+		end := start + pageSize
+		if end > len(m.results) {
+			end = len(m.results)
+		}
+
+		// Ensure start is valid (if results shrank drastically, though search resets page)
+		if start > len(m.results) {
+			start = len(m.results)
+		}
+
+		pageResults := m.results[start:end]
+
+		for i, res := range pageResults {
 			style := resultPathStyle
 			prefix := "  "
 			if i == m.cursor {
@@ -865,6 +904,13 @@ func viewSearch(m model) string {
 			rows = append(rows, style.Render(prefix+line))
 		}
 		content = lipgloss.JoinVertical(lipgloss.Left, rows...)
+
+		// Pagination Footer
+		totalPages := (len(m.results) + pageSize - 1) / pageSize
+		if totalPages > 1 {
+			footer := fmt.Sprintf("\n Page %d/%d (←/→)", m.page+1, totalPages)
+			content = lipgloss.JoinVertical(lipgloss.Left, content, subtleStyle.Render(footer))
+		}
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left,

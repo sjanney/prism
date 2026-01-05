@@ -46,6 +46,8 @@ The Python backend handles all AI inference:
 | `server.py` | gRPC server, routes requests to engine |
 | `engine.py` | YOLOv8 + SigLIP inference, search logic |
 | `database.py` | SQLite operations, embedding storage |
+| `plugins.py` | **[NEW]** Plugin Manager for dynamic extensions |
+| `local_ingestion.py` | **[NEW]** Default local file crawler |
 | `config.py` | Configuration management, Pro license |
 | `errors.py` | Structured error codes |
 
