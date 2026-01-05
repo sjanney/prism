@@ -10,7 +10,7 @@ import (
 var (
 	// -- Colors --
 	// A "Cyberpunk/Premium" palette
-	primaryColor   = lipgloss.Color("#7D00FF") // Electric Indigo
+	primaryColor   = lipgloss.Color("#9D46FF") // Lighter Electric Purple (was #7D00FF)
 	secondaryColor = lipgloss.Color("#00E5FF") // Cyan / Electric Blue
 	accentColor    = lipgloss.Color("#FF00FF") // Neon Magenta
 
@@ -27,50 +27,50 @@ var (
 
 	// Panel Style (Subtle thin borders like Crush)
 	panelStyle = lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder(), false, false, false, false). // No default borders
-		Padding(0, 1)
+			Border(lipgloss.NormalBorder(), false, false, false, false). // No default borders
+			Padding(0, 1)
 
 	sidebarStyle = lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder(), false, false, false, true).
-		BorderForeground(lipgloss.Color("#333333")).
-		Padding(0, 2)
+			Border(lipgloss.NormalBorder(), false, false, false, true).
+			BorderForeground(lipgloss.Color("#333333")).
+			Padding(0, 2)
 
 	separatorStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#222222")).
-		Margin(1, 0)
-        
-    // Textured background for headers
-    headerBoxStyle = lipgloss.NewStyle().
-        Foreground(lipgloss.Color("#000000")).
-        Background(primaryColor).
-        Bold(true).
-        Padding(0, 1).
-        MarginBottom(1)
-        
-    keywordStyle = lipgloss.NewStyle().
-        Foreground(accentColor).
-        Italic(true)
-        
-    asciiTexture = subtleStyle.Render(" //////////////////////////////////////////////////////// ")
+			Foreground(lipgloss.Color("#222222")).
+			Margin(1, 0)
+
+	// Textured background for headers
+	headerBoxStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#000000")).
+			Background(primaryColor).
+			Bold(true).
+			Padding(0, 1).
+			MarginBottom(1)
+
+	keywordStyle = lipgloss.NewStyle().
+			Foreground(accentColor).
+			Italic(true)
+
+	asciiTexture = subtleStyle.Render(" //////////////////////////////////////////////////////// ")
 
 	// -- Text Styles --
 
 	titleStyle = lipgloss.NewStyle().
-		Foreground(secondaryColor).
-		Bold(true).
-		Padding(0, 1).
-		Background(lipgloss.Color("#333333"))
+			Foreground(secondaryColor).
+			Bold(true).
+			Padding(0, 1).
+			Background(lipgloss.Color("#333333"))
 
 	headerStyle = lipgloss.NewStyle().
-		Foreground(primaryColor).
-		Bold(true)
+			Foreground(primaryColor).
+			Bold(true)
 
 	subtleStyle = lipgloss.NewStyle().
-		Foreground(subtleColor)
+			Foreground(subtleColor)
 
 	successStyle = lipgloss.NewStyle().
-		Foreground(successColor).
-		Bold(true)
+			Foreground(successColor).
+			Bold(true)
 
 	// -- Specific Component Styles --
 
@@ -190,11 +190,11 @@ func RenderGradientBanner() string {
 		if strings.TrimSpace(line) == "" && y == 0 {
 			continue
 		}
-		
+
 		for x, char := range line {
 			// Diagonal T (sum of X and Y normalized)
 			// Adjust multipliers to stretch/shrink gradient
-			normX := float64(x) / 40.0 
+			normX := float64(x) / 40.0
 			normY := float64(y) / float64(len(lines))
 			t := (normX + normY) / 2.0
 

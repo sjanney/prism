@@ -259,7 +259,7 @@ func activateLicenseCmd(client pb.PrismServiceClient, key string) tea.Cmd {
 
 func searchCmd(client pb.PrismServiceClient, query string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second) // Long timeout for model cold start
+		ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second) // Ultra long timeout for slow model download/load
 		defer cancel()
 		resp, err := client.Search(ctx, &pb.SearchRequest{QueryText: query})
 		if err != nil {
@@ -290,7 +290,7 @@ func nextIndexCmd(stream pb.PrismService_IndexClient) tea.Cmd {
 
 func openImageCmd(client pb.PrismServiceClient, path string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second) // Increased from 1s to 5s
 		defer cancel()
 		resp, err := client.OpenResult(ctx, &pb.OpenRequest{FilePath: path})
 		if err != nil {
@@ -852,7 +852,7 @@ func viewDashboard(m model) string {
 func viewSearch(m model) string {
 	// Header Section
 	header := lipgloss.JoinVertical(lipgloss.Left,
-		headerBoxStyle.Render("NEURAL SEARCH INTERFACE")+" "+subtleStyle.Render("v2.3"),
+		headerBoxStyle.Render("NEURAL SEARCH INTERFACE")+" "+subtleStyle.Render("v1.0"),
 		m.searchInput.View(),
 		separatorStyle.Render(strings.Repeat("─", m.width-40)),
 	)
