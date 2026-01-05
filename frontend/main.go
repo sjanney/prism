@@ -503,12 +503,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, tea.Quit
 					}
 				} else if m.state == statePro {
-					// Placeholder: Do nothing or return to home?
-					// m.activating = true
-					// m.proStatus = "Activating..."
-					// cmds = append(cmds, activateLicenseCmd(m.client, m.licenseInput.Value()))
-					m.state = stateHome
+					if m.licenseInput.Value() != "" && !m.activating {
+						m.activating = true
+						m.proStatus = "Validating license..."
+						cmds = append(cmds, activateLicenseCmd(m.client, m.licenseInput.Value()))
+					}
 				} else if m.state == stateConnectDB {
+
 					cmds = append(cmds, connectDBCmd(m.client, m.dbInput.Value()))
 					m.connecting = true
 					m.dbStatus = "Connecting..."
@@ -722,6 +723,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dbInput, cmd = m.dbInput.Update(msg)
 		cmds = append(cmds, cmd)
 	}
+	if m.state == statePro {
+		m.licenseInput, cmd = m.licenseInput.Update(msg)
+		cmds = append(cmds, cmd)
+	}
 
 	// Progress Bar Update
 	var progModel tea.Model
@@ -899,6 +904,25 @@ func viewSettings(m model) string {
 		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("MEMORY:"), m.sysInfo.MemoryUsage))
 	} else {
 		content.WriteString(subtleStyle.Render("Component telemetry unavailable."))
+	}
+
+	// License Status Section
+	content.WriteString("\n\n" + headerBoxStyle.Render("LICENSE STATUS") + "\n\n")
+	if m.sysInfo != nil && m.sysInfo.IsPro {
+		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("TIER:"), successStyle.Render("PRO")))
+		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("STATUS:"), successStyle.Render("ACTIVE")))
+		if m.sysInfo.LicenseEmail != "" {
+			content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("ACCOUNT:"), m.sysInfo.LicenseEmail))
+		}
+		if m.sysInfo.LicenseExpires != "" {
+			content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("EXPIRES:"), m.sysInfo.LicenseExpires))
+		}
+		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("LIMITS:"), "Unlimited Indexing"))
+	} else {
+		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("TIER:"), subtleStyle.Render("FREE")))
+		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("STATUS:"), subtleStyle.Render("Community Edition")))
+		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("LIMITS:"), "5,000 images"))
+		content.WriteString("\n" + subtleStyle.Render("  Upgrade to Pro for unlimited indexing!"))
 	}
 
 	// Advanced Section
@@ -1116,26 +1140,31 @@ func viewPro(m model) string {
 		content.WriteString("• Unlimited local indexing\n")
 		content.WriteString("• Advanced S3 Ingestion (COMING SOON)\n")
 		content.WriteString("• Priority Neural Core Support\n")
+		content.WriteString("\n" + subtleStyle.Render("Press ESC to return to dashboard"))
 	} else {
 		content.WriteString("Unlock the full potential of your AV data.\n\n")
-		content.WriteString(keywordStyle.Render("PRO FEATURES COMING SOON!") + "\n\n")
-		content.WriteString("We are working hard to bring you:\n")
-		content.WriteString("• Unlimited local indexing\n")
-		content.WriteString("• Cloud Ingestion (S3)\n\n")
+		content.WriteString(keywordStyle.Render("PRO FEATURES:") + "\n")
+		content.WriteString("• Unlimited local indexing (Free: 5,000 images)\n")
+		content.WriteString("• Cloud Ingestion (S3/GCS)\n")
+		content.WriteString("• Priority Support\n\n")
 
-		content.WriteString(subtleStyle.Render("Check back later for availability."))
+		content.WriteString(headerStyle.Render("Enter License Key:") + "\n")
+		content.WriteString(m.licenseInput.View() + "\n\n")
 
-		// Disable Input View
-		// content.WriteString("Enter License Key:\n")
-		// content.WriteString(m.licenseInput.View() + "\n\n")
+		if m.activating {
+			content.WriteString(m.spinner.View() + " " + m.proStatus)
+		} else if m.proStatus != "" {
+			if strings.Contains(m.proStatus, "Activated") || strings.Contains(m.proStatus, "success") {
+				content.WriteString(successStyle.Render(m.proStatus))
+			} else {
+				content.WriteString(errorStyle.Render(m.proStatus))
+			}
+		} else {
+			content.WriteString(subtleStyle.Render("Press ENTER to activate"))
+		}
 
-		// if m.activating {
-		// 	content.WriteString(m.spinner.View() + " " + m.proStatus)
-		// } else {
-		// 	content.WriteString(subtleStyle.Render(m.proStatus))
-		// }
-
-		// content.WriteString("\n\n" + subtleStyle.Render("Don't have a key? Visit prism.dev/upgrade"))
+		content.WriteString("\n\n" + subtleStyle.Render("Don't have a key? Visit prism.dev/upgrade"))
+		content.WriteString("\n" + subtleStyle.Render("Press ESC to return to dashboard"))
 	}
 
 	return lipgloss.NewStyle().Padding(1, 2).Render(content.String())

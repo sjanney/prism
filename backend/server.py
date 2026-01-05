@@ -5,6 +5,8 @@ import sys
 import subprocess
 import platform
 import logging
+import time
+
 
 # Add current directory to path so imports work if running from backend/
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -225,7 +227,9 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
                 cpu_count=os.cpu_count(),
                 memory_usage=mem_usage,
                 is_pro=config.is_pro,
-                developer_mode=config.settings.get('developer_mode', False)
+                developer_mode=config.settings.get('developer_mode', False),
+                license_email=config.license_email,
+                license_expires=config.license_expires
             )
         except Exception as e:
             logger.error(f"Failed to get system info: {e}")
@@ -236,8 +240,11 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
                 backend_version="error",
                 memory_usage="error",
                 is_pro=False,
-                developer_mode=False
+                developer_mode=False,
+                license_email="",
+                license_expires=""
             )
+
 
     def ActivateLicense(self, request, context):
         key = request.license_key
@@ -344,6 +351,28 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
         )
 
 
+def start_license_checker():
+    """Background thread to validate license periodically."""
+    import threading
+    
+    def check_loop():
+        logger.info("Starting license validation loop...")
+        while True:
+            try:
+                # Force validation by checking property
+                # If cache is expired (1 hour), this triggers an API call
+                is_valid = config.is_pro
+                email = config.license_email
+                logger.info(f"Periodic license check: Valid={is_valid}, Email={email}")
+            except Exception as e:
+                logger.error(f"License check failed: {e}")
+            
+            # Check every hour + 5 minutes to ensure we hit the cache expiry
+            time.sleep(3900)
+
+    thread = threading.Thread(target=check_loop, daemon=True)
+    thread.start()
+
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     # We delay adding the servicer until we are sure imports worked, or we handle ImportError above
@@ -356,6 +385,10 @@ def serve():
 
     server.add_insecure_port('[::]:50051')
     logger.info("Server starting on port 50051...")
+    
+    # Start background tasks
+    start_license_checker()
+    
     server.start()
     try:
         while True:
@@ -365,3 +398,4 @@ def serve():
 
 if __name__ == '__main__':
     serve()
+

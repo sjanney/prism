@@ -99,3 +99,10 @@ env/
 frontend/proto/*.go
 backend/*_pb2*.py
 prism.db.bak
+
+# Admin scripts with secrets (NEVER commit)
+admin-scripts/
+
+# Licensing worker secrets
+licensing-worker/.dev.vars
+licensing-worker/node_modules/

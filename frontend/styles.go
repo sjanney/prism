@@ -72,6 +72,10 @@ var (
 			Foreground(successColor).
 			Bold(true)
 
+	errorStyle = lipgloss.NewStyle().
+			Foreground(errorColor).
+			Bold(true)
+
 	// -- Specific Component Styles --
 
 	bannerTxt = `

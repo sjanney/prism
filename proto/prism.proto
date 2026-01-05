@@ -29,7 +29,10 @@ message GetSystemInfoResponse {
   string memory_usage = 6;
   bool is_pro = 7;
   bool developer_mode = 8;
+  string license_email = 9;
+  string license_expires = 10;
 }
+
 
 message ConnectDatabaseRequest {
   string db_path = 1;
