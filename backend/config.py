@@ -16,6 +16,11 @@ class Config:
             "default_db": str(self.data_dir / "prism.db"),
             "device": "auto",  # auto, cuda, mps, cpu
             "developer_mode": False,  # Enable advanced diagnostics (benchmarks)
+            "video": {
+                "enabled": True,
+                "frames_per_second": 1.0,
+                "max_frames_per_video": 300
+            },
             "models": {
                 "yolo": "yolov8m.pt",
                 "siglip": "google/siglip-so400m-patch14-384"

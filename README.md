@@ -68,6 +68,7 @@ make install && make build
 | Feature | Description |
 |---------|-------------|
 | **Semantic Search** | Query with natural language: "pedestrian crossing street at night" |
+| **Video Support** | Index MP4/AVI/MOV files with smart frame extraction (1fps) |
 | **Object Detection** | YOLOv8-powered context-aware indexing |
 | **GPU Accelerated** | CUDA, Apple MPS, or CPU fallback |
 | **Beautiful TUI** | Terminal interface with real-time progress |

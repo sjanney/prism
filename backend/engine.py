@@ -78,31 +78,45 @@ class LocalSearchEngine:
             image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
             return list(image_features.cpu().numpy())
 
-    def process_batch(self, file_paths: list[str]):
-        """Process a batch of images efficiently."""
+    def process_batch(self, file_inputs: list):
+        """
+        Process a batch of images efficiently.
+        
+        Args:
+            file_inputs: List of either:
+                - str: path to image file
+                - tuple: (virtual_path, PIL.Image) for video frames
+        """
         self._load_yolo()
         self._load_siglip()
         
         results = []
         
-        # 1. Parallel Load all images (Speedup: 2x)
-        # Use simple ThreadPool for I/O bound image loading
+        # 1. Load/resolve all images
         from concurrent.futures import ThreadPoolExecutor
         
-        images = [None] * len(file_paths)
-        valid_paths = [None] * len(file_paths)
+        images = [None] * len(file_inputs)
+        valid_paths = [None] * len(file_inputs)
         
-        def load_img(idx, path):
+        def load_input(idx, input_item):
             try:
-                img = Image.open(path)
-                img.load() # Force load pixel data
-                return idx, img, path
+                if isinstance(input_item, tuple):
+                    # Video frame: (virtual_path, PIL.Image)
+                    path, img = input_item
+                    if img.mode != "RGB":
+                        img = img.convert("RGB")
+                    return idx, img, path
+                else:
+                    # Regular image file path
+                    img = Image.open(input_item)
+                    img.load()  # Force load pixel data
+                    return idx, img, input_item
             except Exception as e:
-                logger.error(f"Error loading {path}: {e}")
+                logger.error(f"Error loading {input_item}: {e}")
                 return idx, None, None
 
         with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = [executor.submit(load_img, i, p) for i, p in enumerate(file_paths)]
+            futures = [executor.submit(load_input, i, p) for i, p in enumerate(file_inputs)]
             for f in futures:
                 idx, img, path = f.result()
                 if img:
