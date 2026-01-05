@@ -81,7 +81,8 @@ logs/
 prism/backend.log
 
 # Datasets
-data/
+data/*
+!data/sample/
 v1.0-trainval*
 blobs/
 
