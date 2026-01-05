@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Python Backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Lint with ruff
+        run: |
+          pip install ruff
+          ruff check backend/ --ignore=E501
+
+      - name: Check imports
+        run: |
+          cd backend && python -c "import server; import engine; import database"
+
+  frontend:
+    name: Go Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+          cache-dependency-path: frontend/go.sum
+
+      - name: Check formatting
+        run: |
+          cd frontend
+          test -z "$(gofmt -l .)" || (echo "Run 'go fmt ./...'" && exit 1)
+
+      - name: Build
+        run: |
+          cd frontend
+          go build -o ../prism_app .
+
+  proto:
+    name: Proto Sync Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install protoc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Install Go protoc plugins
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      - name: Install Python grpc tools
+        run: pip install grpcio-tools
+
+      - name: Regenerate and check for diff
+        run: |
+          ./codegen.sh
+          git diff --exit-code || (echo "Proto files out of sync. Run ./codegen.sh" && exit 1)
