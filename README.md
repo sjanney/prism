@@ -4,30 +4,62 @@
 
 <h1 align="center">Prism</h1>
 <p align="center">
-  <strong>Semantic Search for Local Image Datasets</strong><br>
-  <em>Find anything in your data with natural language. No cloud. No limits.</em>
+  <strong>Semantic Search for Autonomous Vehicle & Robotics Datasets</strong><br>
+  <em>Find any frame in terabytes of sensor data with natural language. 100% local.</em>
 </p>
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> •
+  <a href="#why-local-first">Why Local-First?</a> •
   <a href="#features">Features</a> •
-  <a href="#documentation">Docs</a> •
-  <a href="#prism-pro">Pro</a> •
-  <a href="#contributing">Contributing</a>
+  <a href="docs/">Docs</a>
 </p>
 
 ---
 
 ## What is Prism?
 
-Prism is a **local-first, privacy-preserving** semantic search engine for image datasets. It's designed for engineers working with autonomous vehicles, robotics, and computer vision who need to find specific frames in terabytes of data—without uploading anything to the cloud.
+Prism is a **local-first semantic search engine** built for engineers working with autonomous vehicles, robotics, and computer vision.
 
-**Think "Google Photos search" for your raw sensor data.**
+**Example:** Instead of grepping logs or manually tagging frames, just type:
 
-Instead of manually tagging or grepping through logs, just type:
 > *"red car turning left at intersection"*
 
-Prism uses state-of-the-art vision models (YOLOv8 + Google SigLIP) running **entirely on your machine** to understand and search your images.
+Prism finds matching frames instantly using vision AI (YOLOv8 + SigLIP) running **entirely on your machine**—no cloud, no upload, no limits.
+
+---
+
+## Quick Start
+
+**Requirements:** Python 3.9+, Go 1.21+
+
+```bash
+# Clone and install (takes ~2 min)
+git clone https://github.com/sjanney/prism.git && cd prism
+make install && make build
+
+# Run Prism
+./run_prism.sh
+
+# Try with included sample data:
+# 1. Select "Index New Data" → type "data/sample" → Enter
+# 2. Select "Search Dataset" → type "car" → Enter
+```
+
+**That's it.** You're searching images with natural language.
+
+> 💡 **GPU recommended** for production datasets (CUDA or Apple MPS). CPU works for testing.
+
+---
+
+## Why Local-First?
+
+| Problem | Prism Solution |
+|---------|----------------|
+| Proprietary AV data can't leave your network | All processing on your machine |
+| Terabyte datasets are expensive to upload | Index locally, no egress fees |
+| Cloud latency kills iteration speed | Instant search, sub-second queries |
+| Compliance & IP concerns | Your data never touches a server |
 
 ---
 
@@ -35,104 +67,45 @@ Prism uses state-of-the-art vision models (YOLOv8 + Google SigLIP) running **ent
 
 | Feature | Description |
 |---------|-------------|
-| **Semantic Search** | Query with natural language like "pedestrian with umbrella" |
-| **Local-First** | All processing on your machine. Your data never leaves. |
-| **Object Detection** | YOLOv8-powered detection for context-aware indexing |
-| **GPU Accelerated** | Supports CUDA, Apple MPS, and CPU fallback |
-| **Beautiful TUI** | A stunning terminal interface built with [Bubbletea](https://github.com/charmbracelet/bubbletea) |
-| **Native File Picker** | Open a real folder dialog from the terminal (macOS/Windows) |
-| **gRPC API** | Integrate Prism into your own tools and pipelines |
+| **Semantic Search** | Query with natural language: "pedestrian crossing street at night" |
+| **Object Detection** | YOLOv8-powered context-aware indexing |
+| **GPU Accelerated** | CUDA, Apple MPS, or CPU fallback |
+| **Beautiful TUI** | Terminal interface with real-time progress |
+| **gRPC API** | Integrate into your pipelines |
 
-### Prism Pro
+### Pro Features (Coming Soon)
 
-Unlock advanced features for teams and power users:
-
-| Pro Feature | Description |
-|-------------|-------------|
-| **Unlimited Indexing** | Bypass the 5,000 image free limit |
-| **Cloud Ingestion** | Index directly from S3/GCP/Azure buckets |
-| **Remote Core** | Connect the TUI to a remote GPU server |
-| **Advanced Export** | Export search results to YOLO/COCO format |
-
----
-
-## Quick Start
-
-### Prerequisites
-
-*   **Python 3.9+** (GPU recommended)
-*   **Go 1.21+**
-*   **Protoc** (Protocol Buffer Compiler)
-
-### Installation
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/sjanney/prism.git
-cd prism
-
-# 2. Install dependencies
-make install
-
-# 3. Build & Run
-make build
-./run_prism.sh
-```
-
-### First Steps
-
-1.  Navigate to **Index New Data** using arrow keys.
-2.  Press **`o`** to open the native folder picker, or type a path.
-3.  Press **Enter** to start indexing.
-4.  Once complete, go to **Search** and type your query!
+- Unlimited indexing (free tier: 5,000 images)
+- S3/GCP/Azure ingestion
+- Remote GPU server mode
+- YOLO/COCO export
 
 ---
 
 ## Documentation
 
-Full documentation is available in the [`docs/`](docs/) folder:
-
 | Document | Description |
 |----------|-------------|
-| [Getting Started](docs/getting-started.md) | Installation and first run |
-| [Architecture](docs/architecture.md) | How Prism works under the hood |
-| [Configuration](docs/configuration.md) | Customizing Prism's behavior |
-| [Error Codes](docs/error-codes.md) | Troubleshooting common issues |
-| [API Reference](docs/api-reference.md) | gRPC API for integrations |
+| [Getting Started](docs/getting-started.md) | Full installation guide |
+| [Architecture](docs/architecture.md) | How Prism works |
+| [Configuration](docs/configuration.md) | Customization options |
+| [Benchmarks](docs/benchmarks.md) | Performance diagnostics |
+| [API Reference](docs/api-reference.md) | gRPC integration |
 
 ---
 
 ## Tech Stack
 
-*   **TUI Frontend**: [Go](https://go.dev/) + [Bubbletea](https://github.com/charmbracelet/bubbletea) + [Lipgloss](https://github.com/charmbracelet/lipgloss)
-*   **AI Backend**: [Python](https://www.python.org/) + [PyTorch](https://pytorch.org/)
-*   **Communication**: [gRPC](https://grpc.io/) + Protocol Buffers
-*   **Models**:
-    *   [YOLOv8](https://github.com/ultralytics/ultralytics) (Object Detection)
-    *   [Google SigLIP](https://huggingface.co/google/siglip-so400m-patch14-384) (Semantic Embeddings)
-*   **Storage**: SQLite + NumPy Vector Blobs
-
----
-
-## Contributing
-
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-```bash
-# Run tests
-make test
-
-# Format code
-make fmt
-```
+- **Frontend:** Go + [Bubbletea](https://github.com/charmbracelet/bubbletea)
+- **Backend:** Python + PyTorch
+- **Models:** [YOLOv8](https://github.com/ultralytics/ultralytics) + [Google SigLIP](https://huggingface.co/google/siglip-so400m-patch14-384)
+- **Storage:** SQLite + NumPy vectors
 
 ---
 
 ## License
 
-Apache 2.0 License. See [LICENSE](LICENSE) for details.
-
----
+Apache 2.0. See [LICENSE](LICENSE).
 
 <p align="center">
   <sub>Built by <a href="https://github.com/sjanney">Shane Janney</a></sub>
