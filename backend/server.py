@@ -1,12 +1,10 @@
 import grpc
 from concurrent import futures
-import time
 import os
 import sys
 import subprocess
 import platform
 import logging
-from PIL import Image # Added PIL import
 
 # Add current directory to path so imports work if running from backend/
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -23,7 +21,6 @@ except ImportError:
 from database import Database
 from engine import LocalSearchEngine
 from config import config
-from errors import PathNotFoundError, NoImagesFoundError, FreeLimitReachedError
 from plugins import plugin_manager
 from benchmark import Benchmarker
 import local_ingestion
@@ -51,7 +48,7 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
         if not ingestor:
             if root_path.startswith("s3://") or root_path.startswith("gs://"):
                  context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-                 context.set_details(f"[PSM-5003] Cloud ingestion requires Prism Pro. Upgrade to enable S3/GCP support.")
+                 context.set_details("[PSM-5003] Cloud ingestion requires Prism Pro. Upgrade to enable S3/GCP support.")
                  return
             
             context.set_code(grpc.StatusCode.NOT_FOUND)

@@ -5,7 +5,7 @@ from ultralytics import YOLO
 import numpy as np
 import logging
 
-from errors import DimensionMismatchError, ModelLoadingError
+from errors import DimensionMismatchError
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 # Add current directory to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from plugins import plugin_manager, IngestionSource
+from plugins import plugin_manager
 import local_ingestion
 
 class TestPluginSystem(unittest.TestCase):

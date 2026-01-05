@@ -2,7 +2,7 @@ import os
 import logging
 from typing import Generator, Union, Tuple
 from plugins import IngestionSource, plugin_manager
-from video_utils import extract_frames, is_video_file
+from video_utils import extract_frames
 
 logger = logging.getLogger(__name__)
 

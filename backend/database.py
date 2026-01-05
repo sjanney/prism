@@ -1,7 +1,5 @@
 import sqlite3
 import json
-import os
-import numpy as np
 from datetime import datetime
 
 class Database:
