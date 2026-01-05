@@ -13,6 +13,9 @@ service PrismService {
   rpc GetSystemInfo(GetSystemInfoRequest) returns (GetSystemInfoResponse) {}
   rpc ActivateLicense(ActivateLicenseRequest) returns (ActivateLicenseResponse) {}
   rpc PickFolder(PickFolderRequest) returns (PickFolderResponse) {}
+  // Benchmark & Diagnostics
+  rpc RunBenchmark(RunBenchmarkRequest) returns (stream BenchmarkProgress) {}
+  rpc GetBenchmarkReport(GetBenchmarkReportRequest) returns (BenchmarkReport) {}
 }
 
 message GetSystemInfoRequest {}
@@ -25,6 +28,7 @@ message GetSystemInfoResponse {
   int32 cpu_count = 5;
   string memory_usage = 6;
   bool is_pro = 7;
+  bool developer_mode = 8;
 }
 
 message ConnectDatabaseRequest {
@@ -105,3 +109,35 @@ message PickFolderResponse {
   string path = 2;
   string message = 3;
 }
+
+// ==================== Benchmark & Diagnostics ====================
+
+message RunBenchmarkRequest {
+  string sample_path = 1;  // Path to sample images (default: data/sample)
+}
+
+message BenchmarkProgress {
+  string phase = 1;         // "indexing" | "search" | "complete"
+  int32 current = 2;
+  int32 total = 3;
+  string message = 4;
+}
+
+message BenchmarkMetric {
+  string name = 1;
+  double value = 2;
+  string unit = 3;
+  string context = 4;       // e.g., "batch_size=8, device=mps"
+}
+
+message BenchmarkReport {
+  string timestamp = 1;
+  string prism_version = 2;
+  string device = 3;
+  string os = 4;
+  repeated BenchmarkMetric indexing_metrics = 5;
+  repeated BenchmarkMetric search_metrics = 6;
+  repeated BenchmarkMetric system_metrics = 7;
+}
+
+message GetBenchmarkReportRequest {}

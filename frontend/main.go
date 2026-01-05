@@ -29,6 +29,7 @@ const (
 	stateConnectDB
 	stateSettings
 	statePro
+	stateBenchmark // Developer Mode: Benchmarks & Diagnostics
 )
 
 type sysInfoMsg *pb.GetSystemInfoResponse
@@ -82,6 +83,13 @@ type model struct {
 	licenseInput textinput.Model
 	proStatus    string
 	activating   bool
+
+	// Benchmark & Diagnostics
+	benchmarkReport   *pb.BenchmarkReport
+	benchmarking      bool
+	benchmarkPhase    string
+	benchmarkProgress string
+	devMode           bool
 }
 
 func initialModel() model {
@@ -176,6 +184,14 @@ type folderPickedMsg struct {
 }
 type errMsg error
 type retryConnectMsg struct{}
+
+// Benchmark messages
+type benchmarkProgressMsg struct {
+	stream pb.PrismService_RunBenchmarkClient
+	data   *pb.BenchmarkProgress
+	err    error
+}
+type benchmarkReportMsg *pb.BenchmarkReport
 
 // -- Commands --
 // ... (existing commands same) ...
@@ -300,6 +316,38 @@ func openImageCmd(client pb.PrismServiceClient, path string) tea.Cmd {
 			return errMsg(fmt.Errorf("%s", resp.Message))
 		}
 		return openResultMsg("Opened " + path)
+	}
+}
+
+// Benchmark Commands
+func startBenchmarkCmd(client pb.PrismServiceClient, samplePath string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		stream, err := client.RunBenchmark(ctx, &pb.RunBenchmarkRequest{SamplePath: samplePath})
+		if err != nil {
+			return errMsg(err)
+		}
+		msg, err := stream.Recv()
+		return benchmarkProgressMsg{stream: stream, data: msg, err: err}
+	}
+}
+
+func nextBenchmarkCmd(stream pb.PrismService_RunBenchmarkClient) tea.Cmd {
+	return func() tea.Msg {
+		msg, err := stream.Recv()
+		return benchmarkProgressMsg{stream: stream, data: msg, err: err}
+	}
+}
+
+func getBenchmarkReportCmd(client pb.PrismServiceClient) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		resp, err := client.GetBenchmarkReport(ctx, &pb.GetBenchmarkReportRequest{})
+		if err != nil {
+			return errMsg(err)
+		}
+		return benchmarkReportMsg(resp)
 	}
 }
 
@@ -506,6 +554,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.state = stateHome
 					m.licenseInput.Blur()
 				}
+				if m.state == stateBenchmark {
+					m.state = stateSettings
+				}
+
+			case "b":
+				// Open Benchmark view from Settings
+				if m.state == stateSettings {
+					m.state = stateBenchmark
+				}
+
+			case "r":
+				// Re-run benchmark
+				if m.state == stateBenchmark && !m.benchmarking {
+					m.benchmarking = true
+					m.benchmarkPhase = "starting"
+					m.benchmarkProgress = "Initializing..."
+					cmds = append(cmds, startBenchmarkCmd(m.client, "data/sample"))
+				}
+			}
+
+			// Handle enter in benchmark state
+			if m.state == stateBenchmark && msg.String() == "enter" && !m.benchmarking {
+				m.benchmarking = true
+				m.benchmarkPhase = "starting"
+				m.benchmarkProgress = "Initializing..."
+				cmds = append(cmds, startBenchmarkCmd(m.client, "data/sample"))
 			}
 		}
 
@@ -541,6 +615,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sysInfoMsg:
 		m.loadingSys = false
 		m.sysInfo = msg
+		m.devMode = msg.DeveloperMode
 		// If Pro, remove "Upgrade to Pro" from menu
 		if msg.IsPro {
 			newOpts := []string{}
@@ -600,12 +675,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, nextIndexCmd(msg.stream))
 		}
 
+	case benchmarkProgressMsg:
+		if msg.err == io.EOF {
+			m.benchmarking = false
+			m.benchmarkPhase = "complete"
+			m.benchmarkProgress = "Benchmark complete!"
+			cmds = append(cmds, getBenchmarkReportCmd(m.client))
+		} else if msg.err != nil {
+			m.err = msg.err
+			m.benchmarking = false
+			m.benchmarkProgress = fmt.Sprintf("Error: %v", msg.err)
+		} else {
+			m.benchmarkPhase = msg.data.Phase
+			m.benchmarkProgress = msg.data.Message
+			cmds = append(cmds, nextBenchmarkCmd(msg.stream))
+		}
+
+	case benchmarkReportMsg:
+		m.benchmarkReport = msg
+
 	case errMsg:
 		m.err = msg
 		m.loadingStats = false
 		m.connecting = false
 		m.searching = false
 		m.indexing = false
+		m.benchmarking = false
 		if m.state == stateConnectDB {
 			m.dbStatus = fmt.Sprintf("Error: %v", msg)
 		}
@@ -691,6 +786,8 @@ func (m model) View() string {
 		mainContent = viewSettings(m)
 	case statePro:
 		mainContent = viewPro(m)
+	case stateBenchmark:
+		mainContent = viewBenchmark(m)
 	}
 
 	// Sidebar Content
@@ -802,6 +899,55 @@ func viewSettings(m model) string {
 		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("MEMORY:"), m.sysInfo.MemoryUsage))
 	} else {
 		content.WriteString(subtleStyle.Render("Component telemetry unavailable."))
+	}
+
+	// Advanced Section
+	content.WriteString("\n\n" + headerBoxStyle.Render("ADVANCED") + "\n\n")
+	content.WriteString("  " + keywordStyle.Render("[b]") + " Benchmarks & Diagnostics\n")
+	content.WriteString(subtleStyle.Render("  Press 'b' to access performance diagnostics\n"))
+
+	return lipgloss.NewStyle().Padding(1, 2).Render(content.String())
+}
+
+func viewBenchmark(m model) string {
+	var content strings.Builder
+	content.WriteString(headerBoxStyle.Render("BENCHMARKS & DIAGNOSTICS") + "\n\n")
+
+	if m.benchmarking {
+		content.WriteString(fmt.Sprintf("  %s Running benchmark...\n\n", m.spinner.View()))
+		content.WriteString(fmt.Sprintf("  %s %s\n", statLabelStyle.Render("PHASE:"), keywordStyle.Render(m.benchmarkPhase)))
+		content.WriteString(fmt.Sprintf("  %s %s\n", statLabelStyle.Render("STATUS:"), m.benchmarkProgress))
+	} else if m.benchmarkReport != nil && m.benchmarkReport.Timestamp != "" {
+		// Display last report
+		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("TIMESTAMP:"), m.benchmarkReport.Timestamp))
+		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("DEVICE:"), keywordStyle.Render(m.benchmarkReport.Device)))
+		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("OS:"), m.benchmarkReport.Os))
+		content.WriteString(fmt.Sprintf("%s %s\n\n", statLabelStyle.Render("VERSION:"), m.benchmarkReport.PrismVersion))
+
+		// Indexing Metrics
+		content.WriteString(headerStyle.Render("INDEXING METRICS") + "\n")
+		for _, metric := range m.benchmarkReport.IndexingMetrics {
+			content.WriteString(fmt.Sprintf("  %s: %.2f %s\n", metric.Name, metric.Value, metric.Unit))
+		}
+
+		// Search Metrics
+		content.WriteString("\n" + headerStyle.Render("SEARCH METRICS") + "\n")
+		for _, metric := range m.benchmarkReport.SearchMetrics {
+			content.WriteString(fmt.Sprintf("  %s: %.2f %s\n", metric.Name, metric.Value, metric.Unit))
+		}
+
+		// System Metrics
+		content.WriteString("\n" + headerStyle.Render("SYSTEM METRICS") + "\n")
+		for _, metric := range m.benchmarkReport.SystemMetrics {
+			content.WriteString(fmt.Sprintf("  %s: %.2f %s\n", metric.Name, metric.Value, metric.Unit))
+		}
+
+		content.WriteString("\n" + subtleStyle.Render("Press 'r' to run again, 'e' to export, ESC to go back"))
+	} else {
+		content.WriteString(subtleStyle.Render("No benchmark results yet.") + "\n\n")
+		content.WriteString("Press " + keywordStyle.Render("ENTER") + " to run a benchmark on sample data.\n")
+		content.WriteString(subtleStyle.Render("This will index data/sample and run standard queries.\n"))
+		content.WriteString("\n" + subtleStyle.Render("Press ESC to go back"))
 	}
 
 	return lipgloss.NewStyle().Padding(1, 2).Render(content.String())

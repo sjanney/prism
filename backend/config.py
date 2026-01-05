@@ -15,6 +15,7 @@ class Config:
             "backend_port": 50051,
             "default_db": str(self.data_dir / "prism.db"),
             "device": "auto",  # auto, cuda, mps, cpu
+            "developer_mode": False,  # Enable advanced diagnostics (benchmarks)
             "models": {
                 "yolo": "yolov8m.pt",
                 "siglip": "google/siglip-so400m-patch14-384"

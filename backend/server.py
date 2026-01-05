@@ -25,6 +25,7 @@ from engine import LocalSearchEngine
 from config import config
 from errors import PathNotFoundError, NoImagesFoundError, FreeLimitReachedError
 from plugins import plugin_manager
+from benchmark import Benchmarker
 import local_ingestion
 
 # Configure logging
@@ -39,6 +40,7 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
     def __init__(self):
         self.db = Database()
         self.engine = LocalSearchEngine()
+        self.benchmarker = Benchmarker(self.engine, self.db)
 
     def Index(self, request, context):
         root_path = request.path
@@ -225,7 +227,8 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
                 backend_version="v2.3.1-stable",
                 cpu_count=os.cpu_count(),
                 memory_usage=mem_usage,
-                is_pro=config.is_pro
+                is_pro=config.is_pro,
+                developer_mode=config.settings.get('developer_mode', False)
             )
         except Exception as e:
             logger.error(f"Failed to get system info: {e}")
@@ -235,7 +238,8 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
                 yolo_model="error",
                 backend_version="error",
                 memory_usage="error",
-                is_pro=False
+                is_pro=False,
+                developer_mode=False
             )
 
     def ActivateLicense(self, request, context):
@@ -293,6 +297,54 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(str(e))
             return prism_pb2.GetStatsResponse()
+
+    def RunBenchmark(self, request, context):
+        """Run a full benchmark and stream progress updates."""
+        sample_path = request.sample_path if request.sample_path else "data/sample"
+        logger.info(f"Running benchmark with sample path: {sample_path}")
+        
+        try:
+            for progress in self.benchmarker.run_full_benchmark(sample_path):
+                yield prism_pb2.BenchmarkProgress(
+                    phase=progress.get("phase", ""),
+                    current=progress.get("current", 0),
+                    total=progress.get("total", 0),
+                    message=progress.get("message", "")
+                )
+        except Exception as e:
+            logger.error(f"Benchmark failed: {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(str(e))
+
+    def GetBenchmarkReport(self, request, context):
+        """Return the last benchmark report."""
+        report = self.benchmarker.get_last_report()
+        
+        if not report:
+            return prism_pb2.BenchmarkReport(
+                timestamp="",
+                prism_version="",
+                device="",
+                os=""
+            )
+        
+        def to_proto_metric(m):
+            return prism_pb2.BenchmarkMetric(
+                name=m.get("name", ""),
+                value=m.get("value", 0.0),
+                unit=m.get("unit", ""),
+                context=m.get("context", "")
+            )
+        
+        return prism_pb2.BenchmarkReport(
+            timestamp=report.timestamp,
+            prism_version=report.prism_version,
+            device=report.device,
+            os=report.os,
+            indexing_metrics=[to_proto_metric(m) for m in report.indexing_metrics],
+            search_metrics=[to_proto_metric(m) for m in report.search_metrics],
+            system_metrics=[to_proto_metric(m) for m in report.system_metrics]
+        )
 
 
 def serve():
