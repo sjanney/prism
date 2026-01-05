@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbletea"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -35,12 +35,12 @@ type sysInfoMsg *pb.GetSystemInfoResponse
 
 // Main Model
 type model struct {
-	client     pb.PrismServiceClient
-	conn       *grpc.ClientConn
-	state      state
-	err        error
-	width      int
-	height     int
+	client pb.PrismServiceClient
+	conn   *grpc.ClientConn
+	state  state
+	err    error
+	width  int
+	height int
 
 	// Home / Dashboard
 	dashboardOptions []string
@@ -60,7 +60,7 @@ type model struct {
 	searching   bool
 
 	// Global Spinner
-	spinner      spinner.Model
+	spinner spinner.Model
 
 	// Loading Screen
 	loadingPercent float64
@@ -74,8 +74,8 @@ type model struct {
 	indexCurrent int64
 	indexTotal   int64
 	// Settings / System Info
-	sysInfo      *pb.GetSystemInfoResponse
-	loadingSys   bool
+	sysInfo    *pb.GetSystemInfoResponse
+	loadingSys bool
 
 	// Pro
 	licenseInput textinput.Model
@@ -115,9 +115,9 @@ func initialModel() model {
 		pathInput:        pi,
 		dbInput:          di,
 
-		progress:     prog,
-		spinner:      sp,
-		loadingStats: true,
+		progress:       prog,
+		spinner:        sp,
+		loadingStats:   true,
 		loadingPercent: 0.0,
 		loadingLog:     "Initializing system...",
 
@@ -181,7 +181,7 @@ type retryConnectMsg struct{}
 
 func pickFolderCmd(client pb.PrismServiceClient) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second) 
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		resp, err := client.PickFolder(ctx, &pb.PickFolderRequest{Prompt: "Select Dataset Folder"})
 		if err != nil {
@@ -314,47 +314,47 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.client = pb.NewPrismServiceClient(m.conn)
 		// Don't switch state immediately if we want to show loading animation
 		// But for now, let's switch only if loading finishes or we connected
-        // Actually, let's keep loading until stats return or timeout
-        // For simplicity, we assume connection is the main hurdle.
-        // We will switch state in Tick if progress is done, OR if stats return.
-        
-		cmds = append(cmds, getStatsCmd(m.client))
-    
-    case tickMsg:
-        if m.state == stateLoading {
-            // Simulate loading progress
-            if m.loadingPercent < 1.0 {
-                m.loadingPercent += 0.02
-                
-                // Simulate logs
-                if m.loadingPercent < 0.2 {
-                    m.loadingLog = "Initializing Prism Daemon..."
-                } else if m.loadingPercent < 0.4 {
-                    m.loadingLog = "Loading Configuration..."
-                } else if m.loadingPercent < 0.6 {
-                    m.loadingLog = "Connecting to Neural Core..."
-                } else if m.loadingPercent < 0.8 {
-                    m.loadingLog = "Verifying Database Integrity..."
-                } else {
-                    m.loadingLog = "Starting Interface..."
-                }
+		// Actually, let's keep loading until stats return or timeout
+		// For simplicity, we assume connection is the main hurdle.
+		// We will switch state in Tick if progress is done, OR if stats return.
 
-                cmds = append(cmds, tickCmd())
-                
-                // Update progress bar model
-                cmd = m.progress.SetPercent(m.loadingPercent)
-                cmds = append(cmds, cmd)
-            } else {
-                // Loading done, check if we are connected
-                if m.client != nil {
-                    m.state = stateHome
-                } else {
-                    // Still waiting for connection...
-                     m.loadingLog = "Waiting for Backend Connection..."
-                     cmds = append(cmds, tickCmd())
-                }
-            }
-        }
+		cmds = append(cmds, getStatsCmd(m.client))
+
+	case tickMsg:
+		if m.state == stateLoading {
+			// Simulate loading progress
+			if m.loadingPercent < 1.0 {
+				m.loadingPercent += 0.02
+
+				// Simulate logs
+				if m.loadingPercent < 0.2 {
+					m.loadingLog = "Initializing Prism Daemon..."
+				} else if m.loadingPercent < 0.4 {
+					m.loadingLog = "Loading Configuration..."
+				} else if m.loadingPercent < 0.6 {
+					m.loadingLog = "Connecting to Neural Core..."
+				} else if m.loadingPercent < 0.8 {
+					m.loadingLog = "Verifying Database Integrity..."
+				} else {
+					m.loadingLog = "Starting Interface..."
+				}
+
+				cmds = append(cmds, tickCmd())
+
+				// Update progress bar model
+				cmd = m.progress.SetPercent(m.loadingPercent)
+				cmds = append(cmds, cmd)
+			} else {
+				// Loading done, check if we are connected
+				if m.client != nil {
+					m.state = stateHome
+				} else {
+					// Still waiting for connection...
+					m.loadingLog = "Waiting for Backend Connection..."
+					cmds = append(cmds, tickCmd())
+				}
+			}
+		}
 
 	case retryConnectMsg:
 		cmds = append(cmds, waitForRetry())
@@ -436,9 +436,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, tea.Quit
 					}
 				} else if m.state == statePro {
-					m.activating = true
-					m.proStatus = "Activating..."
-					cmds = append(cmds, activateLicenseCmd(m.client, m.licenseInput.Value()))
+					// Placeholder: Do nothing or return to home?
+					// m.activating = true
+					// m.proStatus = "Activating..."
+					// cmds = append(cmds, activateLicenseCmd(m.client, m.licenseInput.Value()))
+					m.state = stateHome
 				} else if m.state == stateConnectDB {
 					cmds = append(cmds, connectDBCmd(m.client, m.dbInput.Value()))
 					m.connecting = true
@@ -492,12 +494,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statsMsg:
 		m.loadingStats = false
 		m.stats = msg
-        // If we got stats, we are definitely connected.
-        // If simulated loading is also done, switching to home is handled in Tick.
-        // If loading not done, we wait.
-        // If loading done but waiting for stats (rare race), we might need to handle.
-        // For now, let Tick handle transition to Home when loading is 100% AND client != nil.
-        
+		// If we got stats, we are definitely connected.
+		// If simulated loading is also done, switching to home is handled in Tick.
+		// If loading not done, we wait.
+		// If loading done but waiting for stats (rare race), we might need to handle.
+		// For now, let Tick handle transition to Home when loading is 100% AND client != nil.
+
 	case folderPickedMsg:
 		if msg.success {
 			m.pathInput.SetValue(msg.path)
@@ -525,11 +527,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.dashboardOptions = newOpts
-            if m.dashboardCursor >= len(m.dashboardOptions) {
-                m.dashboardCursor = 0
-            }
+			if m.dashboardCursor >= len(m.dashboardOptions) {
+				m.dashboardCursor = 0
+			}
 		}
-        
+
 	case dbConnectedMsg:
 		m.connecting = false
 		if msg.success {
@@ -692,7 +694,7 @@ func (m model) View() string {
 
 	footerGap := strings.Repeat(" ", max(0, m.width-lipgloss.Width(helpLeft)-lipgloss.Width(helpRight)-1))
 	footer := lipgloss.JoinHorizontal(lipgloss.Bottom, helpLeft, footerGap, helpRight)
-	
+
 	doc.WriteString("\n" + footer)
 
 	return docStyle.Render(doc.String())
@@ -706,7 +708,7 @@ func viewSidebar(m model) string {
 	if m.client == nil {
 		healthStatus = "Disconnected"
 	}
-	sections = append(sections, 
+	sections = append(sections,
 		headerStyle.Render("NEURAL CORE"),
 		fmt.Sprintf("Status: %s", healthStatus),
 		fmt.Sprintf("Device: %s", "GPU/MPS"),
@@ -739,21 +741,20 @@ func viewSidebar(m model) string {
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
-
 // -- Sub-Views --
 
 func viewLoading(m model) string {
-    // 50% width progress bar
-    m.progress.Width = 40
-    
+	// 50% width progress bar
+	m.progress.Width = 40
+
 	content := lipgloss.JoinVertical(
 		lipgloss.Center,
 		RenderGradientBanner(),
 		"\n",
-        m.progress.View(),
+		m.progress.View(),
 		logTextStyle.Render(m.loadingLog),
 	)
-	
+
 	// Center the content in the window
 	return lipgloss.Place(
 		m.width, m.height,
@@ -761,7 +762,6 @@ func viewLoading(m model) string {
 		loadingBoxStyle.Render(content),
 	)
 }
-
 
 func viewSettings(m model) string {
 	var content strings.Builder
@@ -782,7 +782,6 @@ func viewSettings(m model) string {
 
 	return lipgloss.NewStyle().Padding(1, 2).Render(content.String())
 }
-
 
 func viewDashboard(m model) string {
 	// Top: Banner
@@ -856,7 +855,7 @@ func viewSearch(m model) string {
 				style = selectedResultStyle
 				prefix = "❯ "
 			}
-			
+
 			path := res.Path
 			if len(path) > 40 {
 				path = "..." + path[len(path)-37:]
@@ -873,7 +872,6 @@ func viewSearch(m model) string {
 		lipgloss.NewStyle().Height(m.height-18).Render(content),
 	)
 }
-
 
 func viewIndex(m model) string {
 	header := lipgloss.JoinVertical(lipgloss.Left,
@@ -903,7 +901,6 @@ func viewIndex(m model) string {
 	)
 }
 
-
 func viewConnectDB(m model) string {
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		headerStyle.Render("CONNECT DATABASE"),
@@ -913,7 +910,7 @@ func viewConnectDB(m model) string {
 		"",
 		m.spinner.View()+" "+m.dbStatus,
 	)
-	
+
 	return lipgloss.Place(m.width, m.height/2, lipgloss.Center, lipgloss.Center, panelStyle.Render(content))
 }
 
@@ -929,18 +926,24 @@ func viewPro(m model) string {
 		content.WriteString("• Priority Neural Core Support\n")
 	} else {
 		content.WriteString("Unlock the full potential of your AV data.\n\n")
-		content.WriteString("Free Trial: " + keywordStyle.Render("5,000 images / session") + "\n")
-		content.WriteString("Upgrade to bypass all local processing limits.\n\n")
-		content.WriteString("Enter License Key:\n")
-		content.WriteString(m.licenseInput.View() + "\n\n")
-		
-		if m.activating {
-			content.WriteString(m.spinner.View() + " " + m.proStatus)
-		} else {
-			content.WriteString(subtleStyle.Render(m.proStatus))
-		}
-		
-		content.WriteString("\n\n" + subtleStyle.Render("Don't have a key? Visit prism.dev/upgrade"))
+		content.WriteString(keywordStyle.Render("PRO FEATURES COMING SOON!") + "\n\n")
+		content.WriteString("We are working hard to bring you:\n")
+		content.WriteString("• Unlimited local indexing\n")
+		content.WriteString("• Cloud Ingestion (S3)\n\n")
+
+		content.WriteString(subtleStyle.Render("Check back later for availability."))
+
+		// Disable Input View
+		// content.WriteString("Enter License Key:\n")
+		// content.WriteString(m.licenseInput.View() + "\n\n")
+
+		// if m.activating {
+		// 	content.WriteString(m.spinner.View() + " " + m.proStatus)
+		// } else {
+		// 	content.WriteString(subtleStyle.Render(m.proStatus))
+		// }
+
+		// content.WriteString("\n\n" + subtleStyle.Render("Don't have a key? Visit prism.dev/upgrade"))
 	}
 
 	return lipgloss.NewStyle().Padding(1, 2).Render(content.String())
