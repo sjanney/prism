@@ -88,28 +88,44 @@ class Database:
         finally:
             conn.close()
 
-    def get_all_embeddings(self):
+    def get_column_vectors(self):
+        """Returns all embedding vectors with their IDs."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # We join with frames to get file_path
-        query = '''
-            SELECT e.id, f.frame_path, e.vector, e.embedding_type, e.object_class, e.bbox, f.width, f.height, f.indexed_at
+        cursor.execute("SELECT id, vector FROM embeddings")
+        rows = cursor.fetchall()
+        
+        conn.close()
+        return rows
+
+    def get_metadata_by_ids(self, embedding_ids):
+        """Returns full metadata for the specified embedding IDs."""
+        if not embedding_ids:
+            return []
+            
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Safe parameterized query for list
+        placeholders = ','.join('?' * len(embedding_ids))
+        query = f'''
+            SELECT e.id, f.frame_path, e.embedding_type, e.object_class, e.bbox, f.width, f.height, f.indexed_at
             FROM embeddings e
             JOIN frames f ON e.frame_id = f.id
+            WHERE e.id IN ({placeholders})
         '''
-        cursor.execute(query)
+        
+        cursor.execute(query, embedding_ids)
         rows = cursor.fetchall()
         conn.close()
         
         results = []
         for r in rows:
-            pk, path, blob, emb_type, obj_class, bbox, w, h, idx_at = r
-            emb = np.frombuffer(blob, dtype=np.float32)
+            pk, path, emb_type, obj_class, bbox, w, h, idx_at = r
             results.append({
                 "id": pk,
                 "file_path": path,
-                "embedding": emb,
                 "type": emb_type,
                 "class": obj_class,
                 "bbox": bbox,
@@ -117,7 +133,10 @@ class Database:
                 "height": h,
                 "indexed_at": idx_at
             })
-        return results
+        
+        # Sort results to match input order if necessary, but caller (search) usually re-sorts or attaches scores
+        # We'll return a dict for O(1) lookup
+        return {res['id']: res for res in results}
 
     def get_stats(self):
         conn = sqlite3.connect(self.db_path)

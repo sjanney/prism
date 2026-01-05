@@ -185,61 +185,80 @@ class LocalSearchEngine:
 
         return results
 
-    def search(self, text_query: str, db_connection):
+    def search(self, text_query: str, db_connection, limit: int = 100):
         # 1. Text embedding
         query_emb = self.compute_text_embedding(text_query)
         expected_dim = query_emb.shape[0]
 
-        # 2. Get all embeddings (with caching)
-        if not hasattr(self, '_embedding_cache') or self._embedding_cache is None:
-            logger.info("Loading embeddings into cache...")
-            all_items = db_connection.get_all_embeddings()
+        # 2. Get vectors only (with caching)
+        # We cache: self._emb_ids (list of IDs) and self._emb_matrix (numpy matrix)
+        if not hasattr(self, '_emb_matrix') or self._emb_matrix is None:
+            logger.info("Loading vector cache (vectors only)...")
+            rows = db_connection.get_column_vectors()
             
-            # Filter only embeddings with correct dimension
-            self._embedding_cache = [
-                item for item in all_items 
-                if item['embedding'].shape[0] == expected_dim
-            ]
+            if not rows:
+                return []
             
-            if len(self._embedding_cache) != len(all_items):
-                logger.warning(f"Filtered out {len(all_items) - len(self._embedding_cache)} embeddings with wrong dimensions.")
+            # Filter and stack
+            valid_ids = []
+            valid_vectors = []
             
-            if self._embedding_cache:
-                self._emb_matrix = np.stack([item['embedding'] for item in self._embedding_cache])
-            else:
-                self._emb_matrix = None
+            for pk, blob in rows:
+                vec = np.frombuffer(blob, dtype=np.float32)
+                if vec.shape[0] == expected_dim:
+                    valid_ids.append(pk)
+                    valid_vectors.append(vec)
+            
+            if not valid_vectors:
+                return []
+                
+            self._emb_ids = valid_ids
+            self._emb_matrix = np.stack(valid_vectors)
+            logger.info(f"Cached {len(valid_ids)} vectors in memory.")
         
-        stored_items = self._embedding_cache
-
-        if not stored_items:
+        if self._emb_matrix is None or len(self._emb_matrix) == 0:
             return []
 
         # Check dimension mismatch
-        if stored_items and stored_items[0]['embedding'].shape != query_emb.shape:
+        if self._emb_matrix.shape[1] != query_emb.shape[0]:
              raise DimensionMismatchError(
                  expected=query_emb.shape[0],
-                 actual=stored_items[0]['embedding'].shape[0]
+                 actual=self._emb_matrix.shape[1]
              )
 
-        # 3. Vectorized Cosine Similarity (SPEED INCREASE)
-        dot_products = np.dot(self._emb_matrix, query_emb)
-
-        scores = []
-        for i, item in enumerate(stored_items):
-            scores.append({
-                "path": item['file_path'],
-                "confidence": float(dot_products[i]),
-                "reasoning": "Visual Neural Match",
-                "width": item['width'],
-                "height": item['height'],
-                "indexed_at": item['indexed_at']
+        # 3. Vectorized Cosine Similarity
+        # Matrix (N, D) dot Vector (D,) -> Scores (N,)
+        scores = np.dot(self._emb_matrix, query_emb)
+        
+        # 4. Sort indices by score descending
+        # argsort gives ascending, so we reverse
+        top_indices = np.argsort(scores)[::-1][:limit]
+        
+        top_ids = [self._emb_ids[i] for i in top_indices]
+        top_scores = [scores[i] for i in top_indices]
+        
+        # 5. Hydrate metadata for top results only
+        metadata_map = db_connection.get_metadata_by_ids(top_ids)
+        
+        final_results = []
+        for i, pk in enumerate(top_ids):
+            meta = metadata_map.get(pk)
+            if not meta:
+                continue
+                
+            final_results.append({
+                "path": meta['file_path'],
+                "confidence": float(top_scores[i]),
+                "reasoning": "Visual Neural Match", # Could be dynamic based on object class
+                "width": meta['width'],
+                "height": meta['height'],
+                "indexed_at": meta['indexed_at'],
+                "bbox": meta.get('bbox') # Include bbox in result
             })
 
-        # 4. Sort and return top 20
-        scores.sort(key=lambda x: x["confidence"], reverse=True)
-        return scores[:20]
+        return final_results
 
     def invalidate_cache(self):
         """Call after indexing to ensure next search reloads."""
-        self._embedding_cache = None
         self._emb_matrix = None
+        self._emb_ids = None

@@ -24,10 +24,16 @@ from database import Database
 from engine import LocalSearchEngine
 from config import config
 from errors import PathNotFoundError, NoImagesFoundError, FreeLimitReachedError
+from plugins import plugin_manager
+import local_ingestion
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Initialize Plugins
+local_ingestion.register()
+plugin_manager.load_plugins()
 
 class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
     def __init__(self):
@@ -36,40 +42,59 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
 
     def Index(self, request, context):
         root_path = request.path
-        if not os.path.exists(root_path):
+        
+        # 1. Resolve Ingestion Source
+        ingestor = plugin_manager.get_ingestion_source_for_path(root_path)
+        
+        if not ingestor:
+            if root_path.startswith("s3://") or root_path.startswith("gs://"):
+                 context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+                 context.set_details(f"[PSM-4003] Cloud ingestion requires Prism Pro. Upgrade to enable S3/GCP support.")
+                 return
+            
             context.set_code(grpc.StatusCode.NOT_FOUND)
-            context.set_details(f"[PSM-4001] Path not found: {root_path}")
+            context.set_details(f"[PSM-4001] Path not found or no suitable ingestor: {root_path}")
             return
 
-        image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'}
-        files_to_process = []
+        logger.info(f"Using ingestor: {ingestor.name} for {root_path}")
 
-        # 1. Discovery phase
-        for root, dirs, files in os.walk(root_path):
-            for file in files:
-                if os.path.splitext(file)[1].lower() in image_extensions:
-                    files_to_process.append(os.path.join(root, file))
+        # 2. Discovery Phase
+        max_files = 0 if config.is_pro else config.settings['max_free_images']
+        files_to_process = []
+        
+        # We collect all first to count (for progress bar), though scraping huge buckets might need streaming.
+        # For now, list-then-process is safer for the progress bar.
+        try:
+             # If not pro, we cap discovery early to avoid long waits
+             limit = max_files if max_files > 0 else 1_000_000 
+             
+             for f in ingestor.discover_files(root_path, max_files=limit):
+                 files_to_process.append(f)
+        except Exception as e:
+            logger.error(f"Discovery failed: {e}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Discovery failed: {str(e)}")
+            return
 
         total_files = len(files_to_process)
         
-        # Freemium Limit
-        if not config.is_pro and total_files > config.settings['max_free_images']:
-            logger.warning(f"Free version limit reached. Found {total_files} but can only index {config.settings['max_free_images']}.")
-            files_to_process = files_to_process[:config.settings['max_free_images']]
+        # Freemium Limit Check (Redundant but safe)
+        if not config.is_pro and total_files >= config.settings['max_free_images']:
+            logger.warning(f"Free version limit hit/reached. Indexed {total_files} items.")
             yield prism_pb2.IndexProgress(
                 current=0,
-                total=len(files_to_process),
-                status_message=f"NOTICE: Free version limit ({config.settings['max_free_images']} images). Upgrade to Pro for unlimited."
+                total=total_files,
+                status_message=f"NOTICE: Free limit ({config.settings['max_free_images']}). Upgrade for unlimited."
             )
 
-        logger.info(f"Processing {len(files_to_process)} images in {root_path}")
-        
-        if len(files_to_process) == 0:
+        if total_files == 0:
             context.set_code(grpc.StatusCode.NOT_FOUND)
             context.set_details(f"[PSM-4002] No images found in: {root_path}")
             return
 
-        # 2. Batch Processing phase
+        logger.info(f"Processing {total_files} images from {root_path}")
+
+        # 3. Batch Processing phase
         BATCH_SIZE = 8
         processed_count = 0
 
