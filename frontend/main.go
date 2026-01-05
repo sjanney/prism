@@ -259,7 +259,7 @@ func activateLicenseCmd(client pb.PrismServiceClient, key string) tea.Cmd {
 
 func searchCmd(client pb.PrismServiceClient, query string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // Long timeout for model cold start
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second) // Long timeout for model cold start
 		defer cancel()
 		resp, err := client.Search(ctx, &pb.SearchRequest{QueryText: query})
 		if err != nil {
