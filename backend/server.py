@@ -126,7 +126,6 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
         processed_count = 0
         skipped_count = 0
         error_count = 0
-        batch_start_time = time.time()
         
         for i in range(0, len(files_to_process), BATCH_SIZE):
             batch_files = files_to_process[i : i + BATCH_SIZE]

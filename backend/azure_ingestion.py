@@ -30,7 +30,7 @@ class AzureIngestionSource(IngestionSource):
         return True
 
     def _get_client(self, container_url=None):
-        from azure.storage.blob import BlobServiceClient, ContainerClient
+        from azure.storage.blob import BlobServiceClient
         
         creds = config.azure_creds
         conn_str = creds.get("connection_string")
@@ -50,7 +50,7 @@ class AzureIngestionSource(IngestionSource):
     def discover_files(self, path: str, max_files: int = 0) -> Generator[str, None, None]:
         """List blobs in Azure container."""
         try:
-            from azure.storage.blob import BlobServiceClient
+            # Client already loaded via _get_client()
             
             client = self._get_client()
             if not client:

@@ -10,8 +10,7 @@ import base64
 from datetime import datetime
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.exceptions import InvalidSignature
-import os # Added for os.chmod
+import os  # Added for os.chmod
 
 # --- CRYPTO CONFIG ---
 PUBLIC_KEY_PEM = """
@@ -148,13 +147,7 @@ class Config:
                 
             signature = base64.b64decode(signature_b64)
             
-            # Construct message exactly as the worker does: key|expires_at|tier
-            # Note: The worker must produce this exact string.
-            key = data.get("key", "") or data.get("license_key", "") # handle both potential naming conventions if needed, but sticking to 'key' is safer if worker returns it.
-            # Actually, let's rely on what we send/receive.
-            # Assuming worker returns: { valid: true, key: "...", expires_at: "...", tier: "...", signature: "..." }
-            
-            # Message format: "{key}|{expires_at}|{tier}"
+            # Message format: "{key}|{expires_at}|{tier}" - must match worker signing
             message = f"{data.get('key', '')}|{data.get('expires_at', '')}|{data.get('tier', '')}".encode('utf-8')
             
             public_key = serialization.load_pem_public_key(PUBLIC_KEY_PEM.encode())
@@ -306,7 +299,7 @@ class Config:
                     if datetime.now(dt.tzinfo) < dt:
                         logger.info("Using valid offline license.")
                         return self._license_cache
-                except:
+                except Exception:
                     pass
             else:
                 # No expiry = lifetime
