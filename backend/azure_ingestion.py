@@ -15,19 +15,10 @@ class AzureIngestionSource(IngestionSource):
         return "Ingest images from Azure Blob Storage containers"
 
     def can_handle(self, path: str) -> bool:
-        """Check if path is azure:// or https blob url and user is Pro."""
-        is_azure = path.startswith("azure://") or (
+        """Check if path is azure:// or https blob url."""
+        return path.startswith("azure://") or (
             path.startswith("https://") and ".blob.core.windows.net" in path
         )
-        
-        if not is_azure:
-            return False
-            
-        if not config.is_pro:
-            logger.warning("Azure ingestion requested but user is not Pro.")
-            return False
-            
-        return True
 
     def _get_client(self, container_url=None):
         from azure.storage.blob import BlobServiceClient

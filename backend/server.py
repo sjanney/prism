@@ -63,21 +63,13 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
         
         if not ingestor:
             if root_path.startswith("s3://"):
-                 if not config.is_pro:
-                     context.set_code(grpc.StatusCode.PERMISSION_DENIED)
-                     context.set_details("S3 ingestion is a Pro feature.")
-                     return
                  context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
-                 context.set_details("S3 plugin not loaded or credentials missing.")
+                 context.set_details("S3 plugin not loaded or credentials missing. Configure in Cloud Settings.")
                  return
             
             if root_path.startswith("azure://") or "blob.core.windows.net" in root_path:
-                 if not config.is_pro:
-                     context.set_code(grpc.StatusCode.PERMISSION_DENIED)
-                     context.set_details("Azure ingestion is a Pro feature.")
-                     return
                  context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
-                 context.set_details("Azure plugin not loaded or credentials missing.")
+                 context.set_details("Azure plugin not loaded or credentials missing. Configure in Cloud Settings.")
                  return
             
             context.set_code(grpc.StatusCode.NOT_FOUND)
@@ -86,13 +78,11 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
         
         logger.info(f"Using ingestor: {ingestor.name} for {root_path}")
 
-        # 2. Discovery Phase
-        max_files = 0 if config.is_pro else config.settings['max_free_images']
+        # 2. Discovery Phase - No limits, all features free
         files_to_process = []
         
         try:
-             limit = max_files if max_files > 0 else 1_000_000 
-             for f in ingestor.discover_files(root_path, max_files=limit):
+             for f in ingestor.discover_files(root_path, max_files=1_000_000):
                  files_to_process.append(f)
         except Exception as e:
             logger.error(f"Discovery failed: {e}")
@@ -101,14 +91,6 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
             return
 
         total_files = len(files_to_process)
-        
-        if not config.is_pro and total_files >= config.settings['max_free_images']:
-            logger.warning(f"Free version limit hit/reached. Indexed {total_files} items.")
-            yield prism_pb2.IndexProgress(
-                current=0,
-                total=total_files,
-                status_message=f"NOTICE: Free limit ({config.settings['max_free_images']}). Upgrade for unlimited."
-            )
 
         if total_files == 0:
             context.set_code(grpc.StatusCode.NOT_FOUND)

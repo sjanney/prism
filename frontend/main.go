@@ -1197,10 +1197,9 @@ func viewSettings(m model) string {
 		}
 		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("LIMITS:"), "Unlimited Indexing"))
 	} else {
-		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("TIER:"), subtleStyle.Render("FREE")))
-		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("STATUS:"), subtleStyle.Render("Community Edition")))
-		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("LIMITS:"), "5,000 images"))
-		content.WriteString("\n" + subtleStyle.Render("  Upgrade to Pro for unlimited indexing!"))
+		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("TIER:"), subtleStyle.Render("Community Edition")))
+		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("STATUS:"), successStyle.Render("All Features Unlocked")))
+		content.WriteString(fmt.Sprintf("%s %s\n", statLabelStyle.Render("LIMITS:"), "Unlimited indexing"))
 	}
 
 	// Advanced Section
@@ -1457,35 +1456,31 @@ func viewConnectDB(m model) string {
 
 func viewPro(m model) string {
 	var content strings.Builder
-	content.WriteString(headerBoxStyle.Render("PRISM PRO ACTIVATION") + "\n\n")
+	content.WriteString(headerBoxStyle.Render("🔮 SECRET FEATURES") + "\n\n")
 
 	if m.sysInfo != nil && m.sysInfo.IsPro {
-		content.WriteString(successStyle.Render("✔ Prism Pro is Active") + "\n\n")
-		content.WriteString("Thank you for supporting Prism! You have unlocked:\n")
-		content.WriteString("• Unlimited local indexing\n")
-		content.WriteString("• Advanced S3 Ingestion (COMING SOON)\n")
-		content.WriteString("• Priority Neural Core Support\n")
-		content.WriteString("\n" + subtleStyle.Render("Press ESC to return to dashboard"))
+		content.WriteString(successStyle.Render("✔ Secret Features Unlocked!") + "\n\n")
+		content.WriteString("You've discovered the hidden features:\n")
+		content.WriteString("• 🎨 Custom themes (coming soon)\n")
+		content.WriteString("• 🚀 Experimental neural modes\n")
+		content.WriteString("• 🔬 Advanced debugging tools\n")
+		content.WriteString("• ⚡ Early access to new features\n")
+		content.WriteString("\n" + subtleStyle.Render("Press ESC to return"))
 	} else {
-		content.WriteString("Unlock the full potential of your AV data.\n\n")
-		content.WriteString(keywordStyle.Render("PRO FEATURES:") + "\n")
-		content.WriteString("• Unlimited local indexing (Free: 5,000 images)\n")
-		content.WriteString("• Cloud Ingestion (S3/GCS)\n")
-		content.WriteString("• Priority Support\n\n")
-
-		content.WriteString(headerStyle.Render("Enter License Key:") + "\n")
+		content.WriteString("You found a hidden area...\n\n")
+		content.WriteString(keywordStyle.Render("ENTER SECRET CODE:") + "\n")
 		content.WriteString(m.licenseInput.View() + "\n\n")
 
 		if m.activating {
 			content.WriteString(m.spinner.View() + " " + m.proStatus)
 		} else if m.proStatus != "" {
 			if strings.Contains(m.proStatus, "Activated") || strings.Contains(m.proStatus, "success") {
-				content.WriteString(successStyle.Render(m.proStatus))
+				content.WriteString(successStyle.Render("✨ " + m.proStatus))
 			} else {
 				content.WriteString(errorStyle.Render(m.proStatus))
 			}
 		} else {
-			content.WriteString(subtleStyle.Render("Press ENTER to activate"))
+			content.WriteString(subtleStyle.Render("Press ENTER to unlock"))
 		}
 
 		content.WriteString("\n\n" + subtleStyle.Render("Don't have a key? Visit prism.dev/upgrade"))

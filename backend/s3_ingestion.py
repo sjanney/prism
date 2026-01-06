@@ -16,15 +16,8 @@ class S3IngestionSource(IngestionSource):
         return "Ingest images from AWS S3 buckets"
 
     def can_handle(self, path: str) -> bool:
-        """Check if path is s3:// and user is Pro."""
-        if not path.startswith("s3://"):
-            return False
-            
-        if not config.is_pro:
-            logger.warning("S3 ingestion requested but user is not Pro.")
-            return False
-            
-        return True
+        """Check if path is s3:// URL."""
+        return path.startswith("s3://")
 
     def _get_client(self):
         creds = config.aws_creds

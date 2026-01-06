@@ -311,12 +311,17 @@ class Config:
 
     @property
     def is_pro(self) -> bool:
-        """Check if user has a valid Pro license with tier verification."""
+        """Legacy property for compatibility. All features now free."""
+        return True  # Everything is free now
+    
+    @property
+    def has_secret_features(self) -> bool:
+        """Check if user has unlocked secret features via license key."""
         info = self._get_license_info()
         if not info.get("valid", False):
             return False
         tier = info.get("tier", "")
-        return tier in ["pro", "enterprise"]
+        return tier in ["pro", "enterprise", "secret"]
 
     @property
     def license_email(self) -> str:
