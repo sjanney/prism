@@ -29,7 +29,7 @@ jobs:
 
       - name: Check imports
         run: |
-          cd backend && python -c "import server; import engine; import database"
+          cd backend && python -c "import config; import server; import engine; import database"
 
   frontend:
     name: Go Frontend

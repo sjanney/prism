@@ -2,6 +2,8 @@ import yaml
 import json
 import time
 import logging
+import hashlib
+import hmac
 from pathlib import Path
 from typing import Optional
 import base64
@@ -112,6 +114,21 @@ class Config:
     def azure_creds(self) -> dict:
         return self.load_credentials().get("azure", {})
 
+    def _compute_cache_integrity(self, data: dict) -> str:
+        """Compute HMAC integrity hash for cache file to detect tampering."""
+        # Create deterministic message from license data
+        message = f"{data.get('key', '')}:{data.get('expires_at', '')}:{data.get('tier', '')}"
+        # Use a static secret - this isn't for security, just integrity
+        return hmac.new(b"prism-cache-integrity-v1", message.encode(), hashlib.sha256).hexdigest()
+
+    def _verify_cache_integrity(self, data: dict) -> bool:
+        """Verify the cache file hasn't been tampered with."""
+        stored_integrity = data.get("_integrity", "")
+        if not stored_integrity:
+            return False
+        computed = self._compute_cache_integrity(data)
+        return hmac.compare_digest(stored_integrity, computed)
+
     def _save_license_cache(self, cache_data: dict):
         """Save license validation result to cache."""
         try:
@@ -186,7 +203,8 @@ class Config:
                 if has_signature and self._verify_signature(data):
                     logger.info("License signature verified successfully.")
                     
-                    # Cache the signed response
+                    # Cache the signed response with integrity
+                    data["_integrity"] = self._compute_cache_integrity(data)
                     self._save_license_cache(data)
                     
                     return {
@@ -195,18 +213,10 @@ class Config:
                         "expires_at": data.get("expires_at", ""),
                         "tier": data.get("tier", "pro")
                     }
-                elif not has_signature:
-                    # Temporarily accept unsigned responses from API (worker needs redeployment)
-                    logger.warning("License API returned unsigned response - accepting but not caching securely.")
-                    return {
-                        "valid": True,
-                        "email": data.get("email", ""),
-                        "expires_at": data.get("expires_at", ""),
-                        "tier": data.get("tier", "pro")
-                    }
                 else:
-                    logger.error("License signature INVALID. Possible tampering.")
-                    return {"valid": False, "error": "Invalid Signature"}
+                    # No signature or invalid signature - require online validation
+                    logger.error("License signature missing or INVALID. Rejecting.")
+                    return {"valid": False, "error": "Invalid or missing signature"}
             else:
                 logger.warning(f"License API returned status {response.status_code}")
                 return {"valid": False}
@@ -226,30 +236,34 @@ class Config:
             with open(cache_path, "r") as f:
                 data = json.load(f)
                 
-            # Verify Signature checks for tampering
-            if self._verify_signature(data):
-                 # Check if expired
-                 expires_at = data.get("expires_at", "")
-                 if expires_at:
-                     try:
-                        # Handle both Z and +00:00 formats
-                        dt_str = expires_at.replace("Z", "+00:00")
-                        # Skip invalid/far-future dates (year > 9999)
-                        if dt_str.startswith("+") or len(dt_str.split("-")[0]) > 4:
-                            logger.info("License has far-future expiration, treating as valid.")
-                        else:
-                            dt = datetime.fromisoformat(dt_str)
-                            if datetime.now(dt.tzinfo) > dt:
-                                 logger.warning("Cached license expired.")
-                                 return {}
-                     except ValueError as e:
-                        logger.warning(f"Date parse error, treating license as valid: {e}")
-                        pass  # Treat parse errors as valid
-                 
-                 return data
-            else:
+            # Verify Signature AND Integrity for double protection
+            if not self._verify_signature(data):
                 logger.warning("Cached license signature invalid. Ignoring.")
                 return {}
+            
+            if not self._verify_cache_integrity(data):
+                logger.warning("Cached license integrity check failed. Possible tampering.")
+                return {}
+            
+            # Check if expired
+            expires_at = data.get("expires_at", "")
+            if expires_at:
+                try:
+                    # Handle both Z and +00:00 formats
+                    dt_str = expires_at.replace("Z", "+00:00")
+                    # Skip invalid/far-future dates (year > 9999)
+                    if dt_str.startswith("+") or len(dt_str.split("-")[0]) > 4:
+                        logger.info("License has far-future expiration, treating as valid.")
+                    else:
+                        dt = datetime.fromisoformat(dt_str)
+                        if datetime.now(dt.tzinfo) > dt:
+                             logger.warning("Cached license expired.")
+                             return {}
+                except ValueError as e:
+                    logger.warning(f"Date parse error, treating license as valid: {e}")
+                    pass  # Treat parse errors as valid
+             
+            return data
                 
         except Exception as e:
             logger.error(f"Failed to load/verify license cache: {e}")
@@ -304,8 +318,12 @@ class Config:
 
     @property
     def is_pro(self) -> bool:
-        """Check if user has a valid Pro license."""
-        return self._get_license_info().get("valid", False)
+        """Check if user has a valid Pro license with tier verification."""
+        info = self._get_license_info()
+        if not info.get("valid", False):
+            return False
+        tier = info.get("tier", "")
+        return tier in ["pro", "enterprise"]
 
     @property
     def license_email(self) -> str:

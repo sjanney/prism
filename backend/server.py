@@ -119,10 +119,14 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
         logger.info(f"Processing {total_files} images from {root_path}")
 
         # 3. Batch Processing phase with deduplication tracking
-        BATCH_SIZE = 8
+        # Use engine's optimal batch size for the device (8-32)
+        BATCH_SIZE = self.engine.optimal_batch_size
+        logger.info(f"Using batch size: {BATCH_SIZE} for {self.engine.device}")
+        
         processed_count = 0
         skipped_count = 0
         error_count = 0
+        batch_start_time = time.time()
         
         for i in range(0, len(files_to_process), BATCH_SIZE):
             batch_files = files_to_process[i : i + BATCH_SIZE]

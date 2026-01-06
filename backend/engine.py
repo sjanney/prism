@@ -21,9 +21,20 @@ COCO_NAMES = {
 }
 
 class LocalSearchEngine:
-    def __init__(self):
+    def __init__(self, use_fp16: bool = True):
         self.device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
         logger.info(f"Using device: {self.device}")
+        
+        # Performance settings
+        self.use_fp16 = use_fp16 and self.device in ["cuda", "mps"]
+        
+        # Dynamic batch size based on device (larger = faster, but more VRAM)
+        if self.device == "cuda":
+            self.optimal_batch_size = 32
+        elif self.device == "mps":
+            self.optimal_batch_size = 16
+        else:
+            self.optimal_batch_size = 8
 
         # Lazy Loading: Initialize to None
         self.processor = None
@@ -44,6 +55,12 @@ class LocalSearchEngine:
             logger.info("Loading SigLIP model (SO400M)...")
             self.processor = SiglipProcessor.from_pretrained("google/siglip-so400m-patch14-384")
             self.model = SiglipModel.from_pretrained("google/siglip-so400m-patch14-384").to(self.device)
+            
+            # Enable FP16 for faster inference
+            if self.use_fp16:
+                self.model = self.model.half()
+                logger.info("Using FP16 for faster inference")
+            
             self.model.eval()
     
     def _load_yolo(self):
@@ -206,7 +223,7 @@ class LocalSearchEngine:
                 return idx, None, input_item, f"ERROR:{e}"
 
 
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ThreadPoolExecutor(max_workers=8) as executor:
             futures = [executor.submit(load_input, i, p) for i, p in enumerate(file_inputs)]
             for f in futures:
                 idx, img, path, hash_or_status = f.result()

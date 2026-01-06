@@ -1379,15 +1379,61 @@ func viewIndex(m model) string {
 	var status string
 	if m.indexing {
 		m.progress.Width = m.width - 45
-		status = lipgloss.JoinVertical(lipgloss.Left,
-			"\n"+keywordStyle.Render("INGESTION ACTIVE"),
-			m.progress.View(),
-			logTextStyle.Render(m.indexStatus),
-			"",
-			fmt.Sprintf("Trace: %d / %d processed", m.indexCurrent, m.indexTotal),
-		)
+
+		// Calculate percentage
+		pct := 0.0
+		if m.indexTotal > 0 {
+			pct = float64(m.indexCurrent) / float64(m.indexTotal) * 100
+		}
+
+		// Format ETA
+		etaStr := "Calculating..."
+		if m.indexETA > 0 {
+			mins := m.indexETA / 60
+			secs := m.indexETA % 60
+			if mins > 0 {
+				etaStr = fmt.Sprintf("%dm %ds remaining", mins, secs)
+			} else {
+				etaStr = fmt.Sprintf("%ds remaining", secs)
+			}
+		} else if m.indexCurrent > 0 && m.indexCurrent == m.indexTotal {
+			etaStr = "Complete!"
+		}
+
+		// Build status lines
+		var statusLines []string
+		statusLines = append(statusLines, "\n"+keywordStyle.Render("INGESTION ACTIVE"))
+		statusLines = append(statusLines, m.progress.View())
+		statusLines = append(statusLines, "")
+
+		// Progress stats line
+		statsLine := fmt.Sprintf("  Processed: %d / %d (%.1f%%)", m.indexCurrent, m.indexTotal, pct)
+		if m.indexSkipped > 0 {
+			statsLine += fmt.Sprintf("  │  Skipped: %d", m.indexSkipped)
+		}
+		statusLines = append(statusLines, statsLine)
+
+		// ETA line
+		statusLines = append(statusLines, subtleStyle.Render("  ETA: "+etaStr))
+		statusLines = append(statusLines, "")
+
+		// Current operation
+		statusLines = append(statusLines, keywordStyle.Render("  STATUS"))
+		statusLines = append(statusLines, "  "+logTextStyle.Render(m.indexStatus))
+
+		status = lipgloss.JoinVertical(lipgloss.Left, statusLines...)
 	} else {
-		status = "\n" + subtleStyle.Render(m.indexStatus)
+		// Not indexing - show instructions
+		var lines []string
+		lines = append(lines, "")
+		if m.indexStatus != "" {
+			lines = append(lines, successStyle.Render("  "+m.indexStatus))
+		} else {
+			lines = append(lines, subtleStyle.Render("  Enter a path or press 'o' to select a folder"))
+		}
+		lines = append(lines, "")
+		lines = append(lines, subtleStyle.Render("  Press ENTER to start indexing"))
+		status = lipgloss.JoinVertical(lipgloss.Left, lines...)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left,

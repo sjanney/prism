@@ -162,6 +162,25 @@ async function handleValidate(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const key = url.searchParams.get('key');
 
+    // Rate limiting: max 20 requests per minute per IP
+    const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+    const rateLimitKey = `ratelimit:validate:${ip}`;
+    const currentCount = await env.LICENSES.get(rateLimitKey);
+    const count = currentCount ? parseInt(currentCount) : 0;
+
+    if (count >= 20) {
+        return new Response(JSON.stringify({
+            valid: false,
+            error: 'Rate limited. Try again later.'
+        }), {
+            status: 429,
+            headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+    }
+
+    // Increment rate limit counter (expires in 60 seconds)
+    await env.LICENSES.put(rateLimitKey, (count + 1).toString(), { expirationTtl: 60 });
+
     if (!key) {
         return new Response(JSON.stringify({
             valid: false,
