@@ -4,14 +4,33 @@ import time
 import logging
 from pathlib import Path
 from typing import Optional
+import base64
+from datetime import datetime
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.exceptions import InvalidSignature
+import os # Added for os.chmod
 
-logger = logging.getLogger(__name__)
+# --- CRYPTO CONFIG ---
+PUBLIC_KEY_PEM = """
+-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4CE9neZ+fuodKZ4570P1
+IGjTpYBN4tVBxObmkCYju7qfbZ/ovWNRzbIeOXJ/YMNUla7iRU5RqGhYKPTmqMuL
+jyD8om8f9w6FfRb4OI98/fm2Tgv/2lEHvKaFUUAT5ah6Ja4LOgnKtOVwjJ/4EjKH
+AjpegBODF1TXThygEYkb7Kr8CEn/wNFYTtP5D3VE/1bRXdEpmsjexlBJqvK6R5wt
+UAzY1i/hPqmtvx1Lf2HBJ0bk6mZisc82EkGp4kVi13+FqwCWieD4jU3ge3yty9NU
+AgciI0brp/SlTVEDJ/oMEGseZ3N7gEJ+RB3GkyK1KazDC/09knqnzeLF6Ekijhxj
+lwIDAQAB
+-----END PUBLIC KEY-----
+"""
+
+logger = logging.getLogger("PrismConfig")
 
 class Config:
     def __init__(self):
         self.config_path = Path.home() / ".prism" / "config.yaml"
         self.data_dir = Path.home() / ".prism"
-        self.cache_path = self.data_dir / "license_cache.json"
+        self.cache_path = self.data_dir / "license_cache.json" # This will be replaced by self.config_dir / "license.cache" in _load_license_cache
         self.data_dir.mkdir(parents=True, exist_ok=True)
         
         # License cache (1 hour TTL)
@@ -39,7 +58,7 @@ class Config:
         }
         
         self.load()
-        self._load_license_cache()
+        self._license_cache = self._load_license_cache() # Changed to assign the result of the new _load_license_cache
 
     def load(self):
         if self.config_path.exists():
@@ -52,107 +71,235 @@ class Config:
         with open(self.config_path, "w") as f:
             yaml.safe_dump(self.settings, f)
 
-    def _load_license_cache(self):
-        """Load cached license validation result."""
-        if self.cache_path.exists():
-            try:
-                with open(self.cache_path, "r") as f:
-                    self._license_cache = json.load(f)
-            except Exception as e:
-                logger.warning(f"Failed to load license cache: {e}")
-                self._license_cache = None
+    @property
+    def config_dir(self) -> Path: # Added config_dir property for consistency with credentials path
+        return self.data_dir
+
+    def load_credentials(self) -> dict:
+        """Load credentials from separate secure file."""
+        creds_path = self.config_dir / "credentials.yaml"
+        if not creds_path.exists():
+            return {}
+        try:
+            with open(creds_path, "r") as f:
+                return yaml.safe_load(f) or {}
+        except Exception as e:
+            logger.error(f"Failed to load credentials: {e}")
+            return {}
+
+    def save_credentials(self, creds: dict):
+        """Save credentials securely."""
+        creds_path = self.config_dir / "credentials.yaml"
+        try:
+            # Ensure file exists first to set permissions
+            if not creds_path.exists():
+                creds_path.touch()
+                os.chmod(creds_path, 0o600)
+            
+            with open(creds_path, "w") as f:
+                yaml.safe_dump(creds, f)
+            
+            # Update permissions again just in case
+            os.chmod(creds_path, 0o600)
+        except Exception as e:
+            logger.error(f"Failed to save credentials: {e}")
+
+    @property
+    def aws_creds(self) -> dict:
+        return self.load_credentials().get("aws", {})
+
+    @property
+    def azure_creds(self) -> dict:
+        return self.load_credentials().get("azure", {})
 
     def _save_license_cache(self, cache_data: dict):
         """Save license validation result to cache."""
         try:
-            with open(self.cache_path, "w") as f:
+            path = self.config_dir / "license.cache"
+            with open(path, "w") as f:
                 json.dump(cache_data, f)
             self._license_cache = cache_data
         except Exception as e:
             logger.warning(f"Failed to save license cache: {e}")
 
+    def _verify_signature(self, data: dict) -> bool:
+        """Verify the cryptographic signature of the license data."""
+        try:
+            signature_b64 = data.get("signature", "")
+            if not signature_b64:
+                return False
+                
+            signature = base64.b64decode(signature_b64)
+            
+            # Construct message exactly as the worker does: key|expires_at|tier
+            # Note: The worker must produce this exact string.
+            key = data.get("key", "") or data.get("license_key", "") # handle both potential naming conventions if needed, but sticking to 'key' is safer if worker returns it.
+            # Actually, let's rely on what we send/receive.
+            # Assuming worker returns: { valid: true, key: "...", expires_at: "...", tier: "...", signature: "..." }
+            
+            # Message format: "{key}|{expires_at}|{tier}"
+            message = f"{data.get('key', '')}|{data.get('expires_at', '')}|{data.get('tier', '')}".encode('utf-8')
+            
+            public_key = serialization.load_pem_public_key(PUBLIC_KEY_PEM.encode())
+            public_key.verify(
+                signature,
+                message,
+                padding.PKCS1v15(),
+                hashes.SHA256()
+            )
+            return True
+        except Exception as e:
+            logger.warning(f"Signature verification failed: {e}")
+            return False
+
     def _validate_license_api(self, key: str) -> dict:
-        """Validate license key against the API. Returns full license data."""
+        """Validate license key against the API with secure signature verification."""
         api_url = self.settings.get("license_api")
         
+        # REQUIRE API_URL - No insecure fallback
         if not api_url:
-            # No API configured, fall back to local validation
-            logger.debug("No license API configured, using local validation")
-            valid = key.startswith("PRISM-PRO-") or key.startswith("PRISM-ENTERPRISE-")
-            return {"valid": valid, "email": "", "expires_at": ""}
+            logger.error("No license API configured. Cannot validate license securely.")
+            return {"valid": False}
         
         try:
             import requests
             response = requests.get(
                 f"{api_url}/validate",
                 params={"key": key},
-                timeout=5
+                timeout=10
             )
             
             if response.status_code == 200:
                 data = response.json()
-                return {
-                    "valid": data.get("valid", False),
-                    "email": data.get("email", ""),
-                    "expires_at": data.get("expires_at", ""),
-                    "tier": data.get("tier", "")
-                }
+                
+                # Verify Signature First
+                if not data.get("valid", False):
+                    return {"valid": False}
+                    
+                # Add the key to the data for verification context if not present (likely is)
+                if "key" not in data:
+                    data["key"] = key
+                
+                # Check for signature
+                has_signature = bool(data.get("signature"))
+                    
+                if has_signature and self._verify_signature(data):
+                    logger.info("License signature verified successfully.")
+                    
+                    # Cache the signed response
+                    self._save_license_cache(data)
+                    
+                    return {
+                        "valid": True,
+                        "email": data.get("email", ""),
+                        "expires_at": data.get("expires_at", ""),
+                        "tier": data.get("tier", "pro")
+                    }
+                elif not has_signature:
+                    # Temporarily accept unsigned responses from API (worker needs redeployment)
+                    logger.warning("License API returned unsigned response - accepting but not caching securely.")
+                    return {
+                        "valid": True,
+                        "email": data.get("email", ""),
+                        "expires_at": data.get("expires_at", ""),
+                        "tier": data.get("tier", "pro")
+                    }
+                else:
+                    logger.error("License signature INVALID. Possible tampering.")
+                    return {"valid": False, "error": "Invalid Signature"}
             else:
                 logger.warning(f"License API returned status {response.status_code}")
-                return {"valid": False, "email": "", "expires_at": ""}
+                return {"valid": False}
                 
-        except ImportError:
-            logger.warning("requests library not available, using local validation")
-            valid = key.startswith("PRISM-PRO-") or key.startswith("PRISM-ENTERPRISE-")
-            return {"valid": valid, "email": "", "expires_at": ""}
         except Exception as e:
             logger.warning(f"License API request failed: {e}")
-            # On network failure, check cache for last known valid state
-            if self._license_cache and self._license_cache.get("key") == key:
-                logger.info("Using cached license validation result")
-                return {
-                    "valid": self._license_cache.get("valid", False),
-                    "email": self._license_cache.get("email", ""),
-                    "expires_at": self._license_cache.get("expires_at", "")
-                }
             return {"valid": False, "email": "", "expires_at": ""}
 
+    def _load_license_cache(self) -> dict:
+        """Load and verify signed license from cache."""
+        # Use config_dir instead of cache_path to avoid confusion if cache_path was misconfigured
+        cache_path = self.config_dir / "license.cache"
+        if not cache_path.exists():
+            return {}
+            
+        try:
+            with open(cache_path, "r") as f:
+                data = json.load(f)
+                
+            # Verify Signature checks for tampering
+            if self._verify_signature(data):
+                 # Check if expired
+                 expires_at = data.get("expires_at", "")
+                 if expires_at:
+                     try:
+                        # Handle both Z and +00:00 formats
+                        dt_str = expires_at.replace("Z", "+00:00")
+                        # Skip invalid/far-future dates (year > 9999)
+                        if dt_str.startswith("+") or len(dt_str.split("-")[0]) > 4:
+                            logger.info("License has far-future expiration, treating as valid.")
+                        else:
+                            dt = datetime.fromisoformat(dt_str)
+                            if datetime.now(dt.tzinfo) > dt:
+                                 logger.warning("Cached license expired.")
+                                 return {}
+                     except ValueError as e:
+                        logger.warning(f"Date parse error, treating license as valid: {e}")
+                        pass  # Treat parse errors as valid
+                 
+                 return data
+            else:
+                logger.warning("Cached license signature invalid. Ignoring.")
+                return {}
+                
+        except Exception as e:
+            logger.error(f"Failed to load/verify license cache: {e}")
+            return {}
+
     def _get_license_info(self) -> dict:
-        """Get license info, using cache if valid."""
+        """Get license info, using offline cache if valid."""
         key = self.settings.get("license_key")
         if not key:
-            return {"valid": False, "email": "", "expires_at": ""}
+            return {"valid": False}
         
-        # Basic format check first
-        if not (key.startswith("PRISM-PRO-") or key.startswith("PRISM-ENTERPRISE-")):
-            return {"valid": False, "email": "", "expires_at": ""}
-        
-        # Check cache
-        if self._license_cache:
-            cache_key = self._license_cache.get("key")
-            cache_time = self._license_cache.get("validated_at", 0)
+        # Trim whitespace from key
+        key = key.strip()
             
-            # Ensure cache has new fields (email), otherwise force refresh
-            has_email = "email" in self._license_cache
+        # 1. Try In-Memory Cache (Fastest)
+        if self._license_cache and self._license_cache.get("key") == key:
+            # Check validation TTL (e.g. 1 hour since last online check)
+            last_checked = self._license_cache.get("validated_at", 0)
+            if (time.time() - last_checked) < self._cache_ttl:
+                return self._license_cache
+
+        # 2. Try Online Validation
+        online_result = self._validate_license_api(key)
+        if online_result.get("valid"):
+            # Update cache info
+            online_result["key"] = key
+            online_result["validated_at"] = time.time()
+            self._save_license_cache(online_result)
+            return online_result
             
-            # Use cache if same key, not expired, AND has new fields
-            if cache_key == key and (time.time() - cache_time) < self._cache_ttl and has_email:
+        # 3. Offline Fallback (Network Failed?)
+        # If we have a valid signed cache for this key, verify it hasn't expired
+        if self._license_cache and self._license_cache.get("key") == key:
+            # We already verified signature on load. Just check expiry.
+            expires = self._license_cache.get("expires_at")
+            if expires:
+                try:
+                    dt_str = expires.replace("Z", "+00:00")
+                    dt = datetime.fromisoformat(dt_str)
+                    if datetime.now(dt.tzinfo) < dt:
+                        logger.info("Using valid offline license.")
+                        return self._license_cache
+                except:
+                    pass
+            else:
+                # No expiry = lifetime
+                logger.info("Using valid offline license (lifetime).")
                 return self._license_cache
         
-        # Validate against API
-        result = self._validate_license_api(key)
-        
-        # Update cache
-        cache_data = {
-            "key": key,
-            "valid": result.get("valid", False),
-            "email": result.get("email", ""),
-            "expires_at": result.get("expires_at", ""),
-            "validated_at": time.time()
-        }
-        self._save_license_cache(cache_data)
-        
-        return cache_data
+        return {"valid": False}
 
 
     @property

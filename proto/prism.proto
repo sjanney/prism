@@ -16,7 +16,13 @@ service PrismService {
   // Benchmark & Diagnostics
   rpc RunBenchmark(RunBenchmarkRequest) returns (stream BenchmarkProgress) {}
   rpc GetBenchmarkReport(GetBenchmarkReportRequest) returns (BenchmarkReport) {}
+  
+  // Cloud Credentials
+  rpc SaveCloudCredentials(SaveCloudCredentialsRequest) returns (SaveCloudCredentialsResponse) {}
+  rpc GetCloudCredentials(GetCloudCredentialsRequest) returns (GetCloudCredentialsResponse) {}
+  rpc ValidateCloudCredentials(ValidateCloudCredentialsRequest) returns (ValidateCloudCredentialsResponse) {}
 }
+
 
 message GetSystemInfoRequest {}
 
@@ -51,10 +57,15 @@ message IndexProgress {
   int64 current = 1;
   int64 total = 2;
   string status_message = 3;
+  int64 skipped = 4;        // Count of skipped (duplicate) files
+  int32 eta_seconds = 5;    // Estimated time remaining
 }
 
 message SearchRequest {
   string query_text = 1;
+  float min_confidence = 2;       // Optional: minimum confidence filter
+  repeated string object_filter = 3; // Optional: filter by detected objects
+  int32 limit = 4;                // Optional: max results to return
 }
 
 message SearchResult {
@@ -66,10 +77,13 @@ message SearchResult {
   string date_modified = 5;
   string file_size = 6;
   repeated string detected_objects = 7;
+  string match_type = 8;          // "full_image" or "object_crop"
 }
 
 message SearchResponse {
   repeated SearchResult results = 1;
+  int32 search_time_ms = 2;       // Search duration in milliseconds
+  int32 total_count = 3;          // Total number of results
 }
 
 message OpenRequest {
@@ -143,4 +157,38 @@ message BenchmarkReport {
   repeated BenchmarkMetric system_metrics = 7;
 }
 
+message SaveCloudCredentialsRequest {
+  string provider = 1; // "aws" or "azure"
+  string aws_access_key = 2;
+  string aws_secret_key = 3;
+  string aws_region = 4;
+  string azure_connection_string = 5;
+}
+
+message SaveCloudCredentialsResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message GetCloudCredentialsRequest {
+  string provider = 1;
+}
+
+message GetCloudCredentialsResponse {
+  bool configured = 1;
+  string aws_access_key_masked = 2; // e.g., "****ABCD"
+  string aws_region = 3;
+  string azure_account_name = 4; // Extracted from conn string
+}
+
+message ValidateCloudCredentialsRequest {
+  string provider = 1;
+}
+
+message ValidateCloudCredentialsResponse {
+  bool success = 1;
+  string message = 2;
+}
+
 message GetBenchmarkReportRequest {}
+

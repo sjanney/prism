@@ -33,6 +33,20 @@ logger = logging.getLogger(__name__)
 
 # Initialize Plugins
 local_ingestion.register()
+
+# Cloud Plugins (if dependencies exist)
+try:
+    from s3_ingestion import S3IngestionSource
+    plugin_manager.register_ingestion_source(S3IngestionSource())
+except ImportError:
+    pass
+
+try:
+    from azure_ingestion import AzureIngestionSource
+    plugin_manager.register_ingestion_source(AzureIngestionSource())
+except ImportError:
+    pass
+
 plugin_manager.load_plugins()
 
 class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
@@ -43,32 +57,42 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
 
     def Index(self, request, context):
         root_path = request.path
+        start_time = time.time()
         
         # 1. Resolve Ingestion Source
         ingestor = plugin_manager.get_ingestion_source_for_path(root_path)
         
         if not ingestor:
-            if root_path.startswith("s3://") or root_path.startswith("gs://"):
-                 context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-                 context.set_details("[PSM-5003] Cloud ingestion requires Prism Pro. Upgrade to enable S3/GCP support.")
+            if root_path.startswith("s3://"):
+                 if not config.is_pro:
+                     context.set_code(grpc.StatusCode.PERMISSION_DENIED)
+                     context.set_details("S3 ingestion is a Pro feature.")
+                     return
+                 context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
+                 context.set_details("S3 plugin not loaded or credentials missing.")
+                 return
+            
+            if root_path.startswith("azure://") or "blob.core.windows.net" in root_path:
+                 if not config.is_pro:
+                     context.set_code(grpc.StatusCode.PERMISSION_DENIED)
+                     context.set_details("Azure ingestion is a Pro feature.")
+                     return
+                 context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
+                 context.set_details("Azure plugin not loaded or credentials missing.")
                  return
             
             context.set_code(grpc.StatusCode.NOT_FOUND)
             context.set_details(f"[PSM-4001] Path not found or no suitable ingestor: {root_path}")
             return
-
+        
         logger.info(f"Using ingestor: {ingestor.name} for {root_path}")
 
         # 2. Discovery Phase
         max_files = 0 if config.is_pro else config.settings['max_free_images']
         files_to_process = []
         
-        # We collect all first to count (for progress bar), though scraping huge buckets might need streaming.
-        # For now, list-then-process is safer for the progress bar.
         try:
-             # If not pro, we cap discovery early to avoid long waits
              limit = max_files if max_files > 0 else 1_000_000 
-             
              for f in ingestor.discover_files(root_path, max_files=limit):
                  files_to_process.append(f)
         except Exception as e:
@@ -79,7 +103,6 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
 
         total_files = len(files_to_process)
         
-        # Freemium Limit Check (Redundant but safe)
         if not config.is_pro and total_files >= config.settings['max_free_images']:
             logger.warning(f"Free version limit hit/reached. Indexed {total_files} items.")
             yield prism_pb2.IndexProgress(
@@ -95,47 +118,168 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
 
         logger.info(f"Processing {total_files} images from {root_path}")
 
-        # 3. Batch Processing phase
+        # 3. Batch Processing phase with deduplication tracking
         BATCH_SIZE = 8
         processed_count = 0
-
+        skipped_count = 0
+        error_count = 0
+        
         for i in range(0, len(files_to_process), BATCH_SIZE):
             batch_files = files_to_process[i : i + BATCH_SIZE]
             
             try:
-                # Returns list of dicts: {path, width, height, embeddings}
-                batch_results = self.engine.process_batch(batch_files)
+                # Pass db for deduplication checks
+                batch_results = self.engine.process_batch(batch_files, db_connection=self.db)
                 
                 for res in batch_results:
-                    if res.get("embeddings"):
+                    if res.get('skipped', False):
+                        skipped_count += 1
+                        reason = res.get('reason', 'unknown')
+                        if reason == 'duplicate':
+                            status_msg = f"Skipped (duplicate): {os.path.basename(res['path'])}"
+                        else:
+                            error_count += 1
+                            status_msg = f"Error: {os.path.basename(res['path'])}"
+                    else:
+                        # Save to database with file hash
                         self.db.save_frame_and_embeddings(
                             res["path"], 
                             res["width"], 
                             res["height"], 
-                            res["embeddings"]
+                            res["embeddings"],
+                            file_hash=res.get("file_hash")
                         )
+                        status_msg = f"Indexed: {os.path.basename(res['path'])}"
+                    
                     processed_count += 1
+                    
+                    # Calculate ETA
+                    elapsed = time.time() - start_time
+                    if processed_count > 0:
+                        eta_seconds = int((elapsed / processed_count) * (total_files - processed_count))
+                    else:
+                        eta_seconds = 0
                     
                     yield prism_pb2.IndexProgress(
                         current=processed_count,
                         total=total_files,
-                        status_message=f"Indexed {os.path.basename(res['path'])}"
+                        status_message=status_msg,
+                        skipped=skipped_count,
+                        eta_seconds=eta_seconds
                     )
                 
-                # Invalidate cache periodically, or at end
                 self.engine.invalidate_cache()
 
             except Exception as e:
                 logger.error(f"Batch processing failed: {e}")
+                error_count += 1
                 yield prism_pb2.IndexProgress(
                     current=processed_count,
                     total=total_files,
-                    status_message=f"Batch Error: {str(e)}"
+                    status_message=f"Batch Error: {str(e)}",
+                    skipped=skipped_count
                 )
+        
+        # Final summary
+        elapsed_total = time.time() - start_time
+        yield prism_pb2.IndexProgress(
+            current=total_files,
+            total=total_files,
+            status_message=f"Complete! {processed_count - skipped_count} indexed, {skipped_count} skipped, {error_count} errors ({elapsed_total:.1f}s)",
+            skipped=skipped_count
+        )
+
+
+        
+    # ... Helper to avoid deleting large chunks ...
+    # Wait, I should use multi_replace or use a better insertion point.
+    # The prompt asked me to replace up to line 373. I need to be precise.
+    # The user instruction was to register plugins and implement RPCs.
+    # I should insert the registration at the top and the RPCs at the bottom of the class.
+
+    def SaveCloudCredentials(self, request, context):
+        logger.info(f"Saving credentials for {request.provider}")
+        try:
+            creds = config.load_credentials()
+            
+            if request.provider == "aws":
+                creds["aws"] = {
+                    "access_key": request.aws_access_key,
+                    "secret_key": request.aws_secret_key,
+                    "region": request.aws_region
+                }
+            elif request.provider == "azure":
+                 creds["azure"] = {
+                     "connection_string": request.azure_connection_string
+                 }
+            else:
+                 return prism_pb2.SaveCloudCredentialsResponse(success=False, message="Unknown provider")
+            
+            config.save_credentials(creds)
+            return prism_pb2.SaveCloudCredentialsResponse(success=True, message="Credentials saved securely.")
+        except Exception as e:
+            logger.error(f"Failed to save credentials: {e}")
+            return prism_pb2.SaveCloudCredentialsResponse(success=False, message=str(e))
+
+    def GetCloudCredentials(self, request, context):
+        creds = config.load_credentials()
+        
+        if request.provider == "aws":
+            aws = creds.get("aws", {})
+            key = aws.get("access_key", "")
+            masked = key[:4] + "****" + key[-4:] if len(key) > 8 else "****"
+            return prism_pb2.GetCloudCredentialsResponse(
+                configured=bool(key),
+                aws_access_key_masked=masked if key else "",
+                aws_region=aws.get("region", "")
+            )
+        elif request.provider == "azure":
+            azure = creds.get("azure", {})
+            conn = azure.get("connection_string", "")
+            # Extract AccountName from connection string
+            account = "Unknown"
+            if "AccountName=" in conn:
+                for part in conn.split(";"):
+                    if part.startswith("AccountName="):
+                        account = part.split("=", 1)[1]
+            
+            return prism_pb2.GetCloudCredentialsResponse(
+                configured=bool(conn),
+                azure_account_name=account if conn else ""
+            )
+        
+        return prism_pb2.GetCloudCredentialsResponse(configured=False)
+
+    def ValidateCloudCredentials(self, request, context):
+        # We can use the ingestion source logic to validate
+        try:
+            if request.provider == "aws":
+                from s3_ingestion import S3IngestionSource
+                source = S3IngestionSource()
+                if source.validate_credentials():
+                     return prism_pb2.ValidateCloudCredentialsResponse(success=True, message="AWS connection successful!")
+                else:
+                     return prism_pb2.ValidateCloudCredentialsResponse(success=False, message="Validation failed. Check credentials.")
+            
+            elif request.provider == "azure":
+                from azure_ingestion import AzureIngestionSource
+                source = AzureIngestionSource()
+                if source.validate_credentials():
+                     return prism_pb2.ValidateCloudCredentialsResponse(success=True, message="Azure connection successful!")
+                else:
+                     return prism_pb2.ValidateCloudCredentialsResponse(success=False, message="Validation failed. Check connection string.")
+
+        except Exception as e:
+            return prism_pb2.ValidateCloudCredentialsResponse(success=False, message=str(e))
+            
+        return prism_pb2.ValidateCloudCredentialsResponse(success=False, message="Unknown provider")
+
 
     def Search(self, request, context):
         query = request.query_text
         logger.info(f"Searching for: {query}")
+        
+        search_start = time.time()
         
         try:
             results = self.engine.search(query, self.db)
@@ -151,15 +295,16 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
                 
                 if os.path.exists(path):
                     try:
-                        # Size is quick to check
                         size_bytes = os.path.getsize(path)
                         file_size = f"{size_bytes / 1024:.1f} KB"
                         if size_bytes > 1024 * 1024:
                             file_size = f"{size_bytes / (1024 * 1024):.1f} MB"
-                            
                     except Exception as meta_e:
                         logger.warning(f"Metadata extraction failed for {path}: {meta_e}")
 
+                # Include detected objects from the search result
+                detected_objects = res.get('detected_objects', [])
+                
                 response_results.append(prism_pb2.SearchResult(
                     path=path,
                     confidence=res['confidence'],
@@ -167,10 +312,18 @@ class PrismServicer(prism_pb2_grpc.PrismServiceServicer):
                     resolution=resolution,
                     file_size=file_size,
                     date_modified=date_mod,
-                    detected_objects=[] 
+                    detected_objects=detected_objects,
+                    match_type=res.get('match_type', 'full_image')
                 ))
+            
+            search_time = time.time() - search_start
+            logger.info(f"Search completed in {search_time:.3f}s, returning {len(response_results)} results")
                 
-            return prism_pb2.SearchResponse(results=response_results)
+            return prism_pb2.SearchResponse(
+                results=response_results,
+                search_time_ms=int(search_time * 1000),
+                total_count=len(response_results)
+            )
             
         except Exception as e:
             logger.error(f"Search failed: {e}")

@@ -36,6 +36,89 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
+// --- CRYPTO SIGNING ---
+// Private Key for signing licenses (Generated offline)
+const PRIVATE_KEY_PEM = `
+-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDgIT2d5n5+6h0p
+njnvQ/UgaNOlgE3i1UHE5uaQJiO7up9tn+i9Y1HNsh45cn9gw1SVruJFTlGoaFgo
+9Oaoy4uPIPyibx/3DoV9Fvg4j3z9+bZOC//aUQe8poVRQBPlqHolrgs6Ccq05XCM
+n/gSMocCOl6AE4MXVNdOHKARiRvsqvwISf/A0VhO0/kPdUT/VtFd0SmayN7GUEmq
+8rpHnC1QDNjWL+E+qa2/HUt/YcEnRuTqZmKxzzYSQaniRWLXf4WrAJaJ4PiNTeB7
+fK3L01QCByIjRuun9KVNUQMn+gwQax5nc3uAQn5EHcaTIrUprMML/T2SeqfN4sXo
+SSKOHGOXAgMBAAECggEAArbGZOjsebg9f+dJlgwmpeJeCdmNE8LD9vPePcNiRecf
+zqO7CM9Hny0FAkllUxRHVWEPXEwxOiqpjRQe/88G6GbxLV34FFBTgg8hsX7uJUcY
+MrbWjDCB5rwHqS3rKpl/kexEV4Czj5O4UE2tZRk1iFcE7C6/yYbUJstgVC3Fp8qm
+5SEpMBUDKq6OOPVKz8B/80ea6gOCbDNpPYp0U1js9+dCQ4/Wor/cbjeRZRVuLjdW
+3JlhYe4bjswD/+zyVNWd9zXh8BNrvp6Klwifq0CD5MWM/eZbvjPisCzN87+FObqu
+F1skUNIkvlh1pNZeIw6/ISkUXD1FGWJg166qVOmVyQKBgQD3NgG1sWnHyP1CDwdW
+fGQ2jm4FLbXTWdbyI5gqMjOS1AZxepl9bU5B49SfHIIjNfUeVK2KLeL1QMKBnh/r
+a9LpbU1yi5plCUXQBHoc0CT55g8ChQ1iAzTQSH8WFbXy11vch1lB6Gdk+0ziy2Jd
+mAAZZQ0bwbPVzi2gY0buD6OpvQKBgQDoGSk1QLzVv8FB1Hl+icnAumgFzI8psd+t
+vOCFkzMTp/AvUQCvzPjT/GAuWH4Zfly9SpBnOmw0f0KA30Qs2TGvcZ9/hItLIOTo
+Ue05yf67zXp+jZZBsRtTjDNGip2xZ3WmDbMU7Hxt8lafKRNevKXD+m5wieqCDnHW
+9x/WSef14wKBgD08aYwCWHues+1rH5wyz/gbq/Eoc4PZGz97xbOeH9xdHQN7JQ5G
+xz3XG9IWE755HTDYNOynlTK/Se8lpi6A1QvxgV/AaQxiEaMHmOAORzqH3Gv5XWlL
+9gcqDiEAW8O9yQmFlXyX/xSqk08Splkcz9l6iJa5kryBiBfUv7s0sIvZAoGAfTr+
+OgaJHQfO3ZcoSrdLzZqGgAKEiGm6F8MendPzrjph5RXeufxtkevNdZQ3zceZgGUY
+Dyq9sYGsv144Kb6zCUfUWHiKs+m2uQdjaVftAyX2XwxEM4O9C9JM5FXsigkZuJQR
+uUt0Q9qLFGuUUPyWsGySZFR13OCwWd2TJwtPhiMCgYEA0/QvZgBj/SMpZTf5B0RI
+owEz1T/lCqJdC4ZdNrjde8liYwGtAX7ogE9ByIhK3qK4npsm50kU89Ko9+6VGDkO
+SoiOHYXMpUPDOJLgMvD7v/ZzShPZkQnCfBFYLVvGxh+WrCDfooxHItbdg0gVMOwE
+HR+fUWhywVHptRDjwFztqHU=
+-----END PRIVATE KEY-----
+`;
+
+/**
+ * Sign a message string using the RSA private key.
+ * Returns the signature as a Base64 string.
+ */
+async function signData(message: string): Promise<string> {
+    try {
+        const pemContents = PRIVATE_KEY_PEM
+            .replace("-----BEGIN PRIVATE KEY-----", "")
+            .replace("-----END PRIVATE KEY-----", "")
+            .replace(/\s/g, "");
+
+        // Base64 decode
+        const binaryDerString = atob(pemContents);
+        const binaryDer = new Uint8Array(binaryDerString.length);
+        for (let i = 0; i < binaryDerString.length; i++) {
+            binaryDer[i] = binaryDerString.charCodeAt(i);
+        }
+
+        const key = await crypto.subtle.importKey(
+            "pkcs8",
+            binaryDer.buffer,
+            {
+                name: "RSASSA-PKCS1-v1_5",
+                hash: "SHA-256",
+            },
+            false,
+            ["sign"]
+        );
+
+        const signature = await crypto.subtle.sign(
+            "RSASSA-PKCS1-v1_5",
+            key,
+            new TextEncoder().encode(message)
+        );
+
+        // Convert ArrayBuffer to Base64
+        let binary = '';
+        const bytes = new Uint8Array(signature);
+        const len = bytes.byteLength;
+        for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary);
+    } catch (e) {
+        console.error("Signing failed:", e);
+        return "";
+    }
+}
+
+
 // Generate a random license key in format: PRISM-{TIER}-XXXX-XXXX-XXXX-XXXX
 function generateLicenseKey(tier: string): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -141,12 +224,18 @@ async function handleValidate(request: Request, env: Env): Promise<Response> {
     // Calculate days remaining
     const daysRemaining = Math.ceil((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
+    // Sign the response data
+    // Message format must match backend: "{key}|{expires_at}|{tier}"
+    const message = `${key}|${license.expires_at}|${license.tier}`;
+    const signature = await signData(message);
+
     return new Response(JSON.stringify({
         valid: true,
         tier: license.tier,
         email: license.email,
         expires_at: license.expires_at,
-        days_remaining: daysRemaining
+        days_remaining: daysRemaining,
+        signature: signature // Include signature in response
     }), {
         headers: { 'Content-Type': 'application/json', ...corsHeaders }
     });

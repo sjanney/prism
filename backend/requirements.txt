@@ -10,3 +10,6 @@ sentencepiece
 protobuf<6.0.0dev
 psutil
 PyYAML
+boto3
+azure-storage-blob
+cryptography

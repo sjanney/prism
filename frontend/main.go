@@ -29,8 +29,26 @@ const (
 	stateConnectDB
 	stateSettings
 	statePro
-	stateBenchmark // Developer Mode: Benchmarks & Diagnostics
+	stateCloudConfig // Cloud: Configure AWS/Azure
+	stateBenchmark   // Developer Mode: Benchmarks & Diagnostics
 )
+
+// Notification types for the sidebar
+type NotificationType int
+
+const (
+	NotifyInfo NotificationType = iota
+	NotifySuccess
+	NotifyWarning
+	NotifyError
+)
+
+// Notification represents a single notification in the sidebar
+type Notification struct {
+	Type      NotificationType
+	Message   string
+	Timestamp time.Time
+}
 
 type sysInfoMsg *pb.GetSystemInfoResponse
 
@@ -90,6 +108,24 @@ type model struct {
 	benchmarkPhase    string
 	benchmarkProgress string
 	devMode           bool
+
+	// Cloud Config
+
+	cloudProvider   int // 0=AWS, 1=Azure
+	awsAccessKey    textinput.Model
+	awsSecretKey    textinput.Model
+	awsRegion       textinput.Model
+	azureConnStr    textinput.Model
+	cloudStatus     string
+	savingCloud     bool
+	cloudFocusIndex int // 0-2 for AWS, 0-0 for Azure
+
+	// Notifications
+	notifications []Notification
+
+	// Index stats (enhanced)
+	indexSkipped int64
+	indexETA     int32
 }
 
 func initialModel() model {
@@ -112,31 +148,66 @@ func initialModel() model {
 	prog := progress.New(progress.WithDefaultGradient())
 	prog.Width = 50
 
-	sp := spinner.New()
-	sp.Spinner = spinner.Dot
-	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+
+	li := textinput.New()
+	li.Placeholder = "PRISM-PRO-XXXX-XXXX"
+	li.CharLimit = 36
+	li.Width = 40
+	li.TextStyle = inputPromptStyle
+
+	// Cloud Inputs
+	// AWS
+	awsAk := textinput.New()
+	awsAk.Placeholder = "AWS Access Key ID"
+	awsAk.CharLimit = 128
+	awsAk.Width = 50
+
+	awsSk := textinput.New()
+	awsSk.Placeholder = "AWS Secret Access Key"
+	awsSk.EchoMode = textinput.EchoPassword
+	awsSk.CharLimit = 128
+	awsSk.Width = 50
+
+	awsReg := textinput.New()
+	awsReg.Placeholder = "Region (e.g. us-east-1)"
+	awsReg.CharLimit = 32
+	awsReg.Width = 20
+
+	// Azure
+	azConn := textinput.New()
+	azConn.Placeholder = "Azure Storage Connection String"
+	azConn.EchoMode = textinput.EchoPassword
+	azConn.CharLimit = 512
+	azConn.Width = 60
 
 	return model{
 		state:            stateLoading,
-		dashboardOptions: []string{"Search Dataset", "Index New Data", "Cloud Ingestion (S3)", "Connect Database", "Upgrade to Pro", "Quit"},
+		dashboardOptions: []string{"Search", "Ingest Data", "Connect Database", "Settings"},
 		dashboardCursor:  0,
 		searchInput:      si,
 		pathInput:        pi,
 		dbInput:          di,
 
 		progress:       prog,
-		spinner:        sp,
+		spinner:        s,
 		loadingStats:   true,
-		loadingPercent: 0.0,
-		loadingLog:     "Initializing system...",
+		loadingPercent: 0,
+		loadingLog:     "Initializing...",
 
-		licenseInput: func() textinput.Model {
-			li := textinput.New()
-			li.Placeholder = "PRISM-PRO-XXXX-XXXX"
-			li.CharLimit = 32
-			li.Width = 40
-			return li
-		}(),
+		licenseInput: li,
+
+		awsAccessKey:  awsAk,
+		awsSecretKey:  awsSk,
+		awsRegion:     awsReg,
+		azureConnStr:  azConn,
+		cloudProvider: 0, // Default AWS
+
+		notifications: []Notification{
+			{Type: NotifyInfo, Message: "Prism initialized", Timestamp: time.Now()},
+		},
 	}
 }
 
@@ -431,6 +502,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, getSystemInfoCmd(m.client))
 				} else if m.state == stateSettings {
 					m.state = stateHome
+				} else if m.state == stateCloudConfig {
+					if m.cloudProvider == 0 {
+						m.cloudProvider = 1
+					} else {
+						m.cloudProvider = 0
+					}
+					m.cloudStatus = "Switched Provider"
 				} else {
 					m.state = stateHome
 					m.dbInput.Blur()
@@ -441,9 +519,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.dashboardCursor > 0 {
 						m.dashboardCursor--
 					}
-				} else if m.state == stateSearch && !m.searchInput.Focused() {
 					if m.cursor > 0 {
 						m.cursor--
+					}
+				} else if m.state == stateCloudConfig {
+					// Handle focus cycle
+					if m.cloudProvider == 0 { // AWS
+						m.cloudFocusIndex--
+						if m.cloudFocusIndex < 0 {
+							m.cloudFocusIndex = 2
+						}
+						// Apply focus
+						if m.cloudFocusIndex == 0 {
+							m.awsAccessKey.Focus()
+							m.awsSecretKey.Blur()
+							m.awsRegion.Blur()
+						}
+						if m.cloudFocusIndex == 1 {
+							m.awsAccessKey.Blur()
+							m.awsSecretKey.Focus()
+							m.awsRegion.Blur()
+						}
+						if m.cloudFocusIndex == 2 {
+							m.awsAccessKey.Blur()
+							m.awsSecretKey.Blur()
+							m.awsRegion.Focus()
+						}
 					}
 				}
 
@@ -458,6 +559,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Actually, let's keep cursor relative to the page (0-14)
 					if m.cursor < 14 && (m.page*15+m.cursor+1 < len(m.results)) {
 						m.cursor++
+					}
+				} else if m.state == stateCloudConfig {
+					if m.cloudProvider == 0 { // AWS
+						m.cloudFocusIndex++
+						if m.cloudFocusIndex > 2 {
+							m.cloudFocusIndex = 0
+						}
+						// Apply focus
+						if m.cloudFocusIndex == 0 {
+							m.awsAccessKey.Focus()
+							m.awsSecretKey.Blur()
+							m.awsRegion.Blur()
+						}
+						if m.cloudFocusIndex == 1 {
+							m.awsAccessKey.Blur()
+							m.awsSecretKey.Focus()
+							m.awsRegion.Blur()
+						}
+						if m.cloudFocusIndex == 2 {
+							m.awsAccessKey.Blur()
+							m.awsSecretKey.Blur()
+							m.awsRegion.Focus()
+						}
 					}
 				}
 
@@ -532,14 +656,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.pathInput.Blur()
 						cmds = append(cmds, startIndexCmd(m.client, m.pathInput.Value()))
 					}
+				} else if m.state == stateCloudConfig && !m.savingCloud {
+					// Enter in Cloud Config saves credentials
+					m.savingCloud = true
+					m.cloudStatus = "Saving..."
+					if m.cloudProvider == 0 {
+						cmds = append(cmds, saveCloudCredentialsCmd(m.client, "aws", m.awsAccessKey.Value(), m.awsSecretKey.Value(), m.awsRegion.Value(), ""))
+					} else {
+						cmds = append(cmds, saveCloudCredentialsCmd(m.client, "azure", "", "", "", m.azureConnStr.Value()))
+					}
 				}
 
 			case "o":
 				if m.state == stateIndex && !m.indexing {
 					cmds = append(cmds, pickFolderCmd(m.client))
+					// Return early to prevent 'o' from being typed into pathInput
+					return m, tea.Batch(cmds...)
+				}
+
+			case "b":
+				if m.state == stateSettings {
+					m.state = stateBenchmark
+				}
+
+			case "c":
+				if m.state == stateSettings {
+					m.state = stateCloudConfig
+					m.cloudStatus = "" // Reset status
+					m.cloudFocusIndex = 0
+					// Auto-focus first input
+					if m.cloudProvider == 0 {
+						m.awsAccessKey.Focus()
+					} else {
+						m.azureConnStr.Focus()
+					}
 				}
 
 			case "esc":
+
 				if m.state == stateSearch {
 					m.searchInput.Focus()
 				}
@@ -558,20 +712,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.state == stateBenchmark {
 					m.state = stateSettings
 				}
-
-			case "b":
-				// Open Benchmark view from Settings
-				if m.state == stateSettings {
-					m.state = stateBenchmark
+				if m.state == stateCloudConfig {
+					m.state = stateSettings
+					m.cloudStatus = "" // clear status
 				}
 
 			case "r":
+
 				// Re-run benchmark
 				if m.state == stateBenchmark && !m.benchmarking {
 					m.benchmarking = true
 					m.benchmarkPhase = "starting"
 					m.benchmarkProgress = "Initializing..."
 					cmds = append(cmds, startBenchmarkCmd(m.client, "data/sample"))
+				}
+
+			case "s":
+				if m.state == stateCloudConfig && !m.savingCloud && !m.awsAccessKey.Focused() && !m.awsSecretKey.Focused() && !m.awsRegion.Focused() && !m.azureConnStr.Focused() {
+					m.savingCloud = true
+					m.cloudStatus = "Saving & Connecting..."
+					if m.cloudProvider == 0 {
+						cmds = append(cmds, saveCloudCredentialsCmd(m.client, "aws", m.awsAccessKey.Value(), m.awsSecretKey.Value(), m.awsRegion.Value(), ""))
+					} else {
+						cmds = append(cmds, saveCloudCredentialsCmd(m.client, "azure", "", "", "", m.azureConnStr.Value()))
+					}
+				}
+
+			case "t":
+				if m.state == stateCloudConfig && !m.savingCloud && !m.awsAccessKey.Focused() && !m.awsSecretKey.Focused() && !m.awsRegion.Focused() && !m.azureConnStr.Focused() {
+					m.savingCloud = true
+					m.cloudStatus = "Testing Connection..."
+					provider := "aws"
+					if m.cloudProvider == 1 {
+						provider = "azure"
+					}
+					cmds = append(cmds, validateCloudCredentialsCmd(m.client, provider))
 				}
 			}
 
@@ -610,7 +785,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.proStatus = msg.message
 		if msg.success {
 			cmds = append(cmds, getSystemInfoCmd(m.client))
-			// Refresh dashboard options in next step or via sysInfo
+			m.addNotification(NotifySuccess, "Pro license activated!")
+		} else {
+			m.addNotification(NotifyError, "License activation failed")
 		}
 
 	case sysInfoMsg:
@@ -635,11 +812,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.connecting = false
 		if msg.success {
 			m.dbStatus = "Connected!"
-			cmds = append(cmds, getStatsCmd(m.client))
-			m.state = stateHome // Go back to dashboard on success
+			m.addNotification(NotifySuccess, "Database connected")
 		} else {
-			m.dbStatus = "Error: " + msg.message
+			m.dbStatus = msg.message
+			m.addNotification(NotifyError, "DB connection failed")
 		}
+
+	case cloudSaveMsg:
+		m.savingCloud = false
+		if msg.success {
+			m.cloudStatus = "Success: " + msg.message
+			m.addNotification(NotifySuccess, msg.message)
+		} else {
+			m.cloudStatus = "Error: " + msg.message
+			m.addNotification(NotifyError, "Cloud config failed")
+		}
+		// The following lines seem to be a copy-paste error from the original dbConnectedMsg.
+		// They are syntactically incorrect and will be removed to ensure valid Go code.
+		// ppend(cmds, getStatsCmd(m.client))
+		// m.state = stateHome // Go back to dashboard on success
+		// } else {
+		// m.dbStatus = "Error: " + msg.message
+		// }
 
 	case searchResultsMsg:
 		m.searching = false
@@ -648,8 +842,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.page = 0
 		if len(m.results) > 0 {
 			m.searchInput.Blur()
+			m.addNotification(NotifyInfo, fmt.Sprintf("Found %d results", len(m.results)))
 		} else {
 			m.searchInput.Focus()
+			m.addNotification(NotifyWarning, "No results found")
 		}
 
 	case indexStreamMsg:
@@ -659,14 +855,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pathInput.Focus()
 			cmds = append(cmds, m.progress.SetPercent(1.0))
 			cmds = append(cmds, getStatsCmd(m.client))
+			// Add success notification
+			summary := fmt.Sprintf("Indexed %d frames", m.indexCurrent)
+			if m.indexSkipped > 0 {
+				summary += fmt.Sprintf(" (%d skipped)", m.indexSkipped)
+			}
+			m.addNotification(NotifySuccess, summary)
 		} else if msg.err != nil {
 			m.err = msg.err
 			m.indexing = false
 			m.indexStatus = fmt.Sprintf("Error: %v", msg.err)
+			m.addNotification(NotifyError, "Indexing failed")
 		} else {
 			m.indexCurrent = msg.data.Current
 			m.indexTotal = msg.data.Total
-			m.indexStatus = msg.data.StatusMessage // "Processing file..."
+			m.indexStatus = msg.data.StatusMessage
+			m.indexSkipped = msg.data.Skipped
+			m.indexETA = msg.data.EtaSeconds
 			pct := 0.0
 			if m.indexTotal > 0 {
 				pct = float64(m.indexCurrent) / float64(m.indexTotal)
@@ -702,6 +907,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.searching = false
 		m.indexing = false
 		m.benchmarking = false
+		m.addNotification(NotifyError, fmt.Sprintf("%v", msg))
 		if m.state == stateConnectDB {
 			m.dbStatus = fmt.Sprintf("Error: %v", msg)
 		}
@@ -726,6 +932,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.state == statePro {
 		m.licenseInput, cmd = m.licenseInput.Update(msg)
 		cmds = append(cmds, cmd)
+	}
+	if m.state == stateCloudConfig {
+		// Update cloud inputs
+		if m.cloudProvider == 0 {
+			m.awsAccessKey, cmd = m.awsAccessKey.Update(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+
+			m.awsSecretKey, cmd = m.awsSecretKey.Update(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+
+			m.awsRegion, cmd = m.awsRegion.Update(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		} else {
+			m.azureConnStr, cmd = m.azureConnStr.Update(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 	}
 
 	// Progress Bar Update
@@ -793,6 +1023,8 @@ func (m model) View() string {
 		mainContent = viewPro(m)
 	case stateBenchmark:
 		mainContent = viewBenchmark(m)
+	case stateCloudConfig:
+		mainContent = viewCloudConfig(m)
 	}
 
 	// Sidebar Content
@@ -841,7 +1073,7 @@ func viewSidebar(m model) string {
 	)
 
 	// Section 2: Contextual Info
-	if m.state == stateSearch && len(m.results) > 0 {
+	if m.state == stateSearch && len(m.results) > 0 && m.cursor < len(m.results) {
 		selected := m.results[m.cursor]
 		sections = append(sections,
 			"\n"+headerStyle.Render("SELECTED FRAME"),
@@ -849,6 +1081,21 @@ func viewSidebar(m model) string {
 			fmt.Sprintf("Res: %s", selected.Resolution),
 			fmt.Sprintf("Size: %s", selected.FileSize),
 		)
+		// Show match type
+		if selected.MatchType != "" {
+			matchType := "Full Image"
+			if selected.MatchType == "object_crop" {
+				matchType = "Object Crop"
+			}
+			sections = append(sections, fmt.Sprintf("Type: %s", matchType))
+		}
+		// Show detected objects
+		if len(selected.DetectedObjects) > 0 {
+			sections = append(sections, "\n"+headerStyle.Render("DETECTED"))
+			for _, obj := range selected.DetectedObjects {
+				sections = append(sections, logTextStyle.Render("• "+obj))
+			}
+		}
 	} else if m.stats != nil {
 		sections = append(sections,
 			"\n"+headerStyle.Render("DATASET STATS"),
@@ -857,12 +1104,43 @@ func viewSidebar(m model) string {
 		)
 	}
 
-	// Section 3: Recent Logs (Simulation/Real)
-	sections = append(sections,
-		"\n"+headerStyle.Render("ACTIVITY LOG"),
-		logTextStyle.Render("Interface Ready"),
-		logTextStyle.Render("Backend Synced"),
-	)
+	// Section 3: Notifications (dynamic)
+	sections = append(sections, "\n"+headerStyle.Render("NOTIFICATIONS"))
+
+	if len(m.notifications) == 0 {
+		sections = append(sections, logTextStyle.Render("No notifications"))
+	} else {
+		// Show last 5 notifications (most recent first)
+		start := len(m.notifications) - 5
+		if start < 0 {
+			start = 0
+		}
+		for i := len(m.notifications) - 1; i >= start; i-- {
+			n := m.notifications[i]
+			var style lipgloss.Style
+			var icon string
+			switch n.Type {
+			case NotifySuccess:
+				style = lipgloss.NewStyle().Foreground(successColor)
+				icon = "✓"
+			case NotifyError:
+				style = lipgloss.NewStyle().Foreground(errorColor)
+				icon = "✗"
+			case NotifyWarning:
+				style = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB800"))
+				icon = "⚠"
+			default:
+				style = logTextStyle
+				icon = "•"
+			}
+			timeStr := formatRelativeTime(n.Timestamp)
+			msg := n.Message
+			if len(msg) > 22 {
+				msg = msg[:19] + "..."
+			}
+			sections = append(sections, style.Render(fmt.Sprintf("%s %s", icon, msg))+" "+subtleStyle.Render(timeStr))
+		}
+	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
@@ -928,7 +1206,8 @@ func viewSettings(m model) string {
 	// Advanced Section
 	content.WriteString("\n\n" + headerBoxStyle.Render("ADVANCED") + "\n\n")
 	content.WriteString("  " + keywordStyle.Render("[b]") + " Benchmarks & Diagnostics\n")
-	content.WriteString(subtleStyle.Render("  Press 'b' to access performance diagnostics\n"))
+	content.WriteString("  " + keywordStyle.Render("[c]") + " Configure Cloud Credentials (Pro)\n")
+	content.WriteString(subtleStyle.Render("  Press 'b' or 'c' to access tools\n"))
 
 	return lipgloss.NewStyle().Padding(1, 2).Render(content.String())
 }
@@ -1170,11 +1449,133 @@ func viewPro(m model) string {
 	return lipgloss.NewStyle().Padding(1, 2).Render(content.String())
 }
 
+// addNotification adds a notification to the model (keeps last 10)
+func (m *model) addNotification(ntype NotificationType, message string) {
+	n := Notification{
+		Type:      ntype,
+		Message:   message,
+		Timestamp: time.Now(),
+	}
+	m.notifications = append(m.notifications, n)
+	// Keep only last 10
+	if len(m.notifications) > 10 {
+		m.notifications = m.notifications[len(m.notifications)-10:]
+	}
+}
+
+// formatRelativeTime returns a human-readable relative time string
+func formatRelativeTime(t time.Time) string {
+	diff := time.Since(t)
+	if diff < time.Minute {
+		return fmt.Sprintf("%ds ago", int(diff.Seconds()))
+	} else if diff < time.Hour {
+		return fmt.Sprintf("%dm ago", int(diff.Minutes()))
+	} else if diff < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", int(diff.Hours()))
+	}
+	return t.Format("Jan 2")
+}
+
 func max(a, b int) int {
 	if a > b {
 		return a
 	}
 	return b
+}
+
+func viewCloudConfig(m model) string {
+	var content strings.Builder
+
+	content.WriteString(headerBoxStyle.Render("CONFIGURE CLOUD CREDENTIALS") + "\n\n")
+
+	// Tabs
+	awsTab := " AWS S3 "
+	azureTab := " Azure Blob "
+
+	if m.cloudProvider == 0 {
+		awsTab = activeTabStyle.Render(awsTab)
+		azureTab = tabStyle.Render(azureTab)
+	} else {
+		awsTab = tabStyle.Render(awsTab)
+		azureTab = activeTabStyle.Render(azureTab)
+	}
+
+	content.WriteString(awsTab + "  " + azureTab + "\n\n")
+	content.WriteString(subtleStyle.Render("Press TAB to switch providers.") + "\n\n")
+
+	if m.cloudProvider == 0 {
+		content.WriteString("Access Key ID:\n")
+		content.WriteString(m.awsAccessKey.View() + "\n\n")
+
+		content.WriteString("Secret Access Key:\n")
+		content.WriteString(m.awsSecretKey.View() + "\n\n")
+
+		content.WriteString("Region:\n")
+		content.WriteString(m.awsRegion.View() + "\n\n")
+	} else {
+		content.WriteString("Connection String:\n")
+		content.WriteString(m.azureConnStr.View() + "\n\n")
+	}
+
+	content.WriteString("\n")
+	content.WriteString("  " + keywordStyle.Render("[↑/↓]") + " Navigate fields\n")
+	content.WriteString("  " + keywordStyle.Render("[ENTER]") + " Save Credentials\n")
+	content.WriteString("  " + keywordStyle.Render("[T]") + " Test Connection\n")
+	content.WriteString("  " + keywordStyle.Render("[TAB]") + " Switch Provider\n")
+	content.WriteString("  " + keywordStyle.Render("[ESC]") + " Back\n")
+
+	if m.cloudStatus != "" {
+		content.WriteString("\nStatus: " + m.cloudStatus + "\n")
+	}
+
+	return lipgloss.NewStyle().Padding(1, 2).Render(content.String())
+}
+
+type cloudSaveMsg struct {
+	success bool
+	message string
+}
+
+func saveCloudCredentialsCmd(client pb.PrismServiceClient, provider, awsKey, awsSecret, awsRegion, azConn string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		resp, err := client.SaveCloudCredentials(ctx, &pb.SaveCloudCredentialsRequest{
+			Provider:              provider,
+			AwsAccessKey:          awsKey,
+			AwsSecretKey:          awsSecret,
+			AwsRegion:             awsRegion,
+			AzureConnectionString: azConn,
+		})
+
+		if err != nil {
+			return cloudSaveMsg{success: false, message: err.Error()}
+		}
+		if resp == nil {
+			return cloudSaveMsg{success: false, message: "Empty response from server"}
+		}
+		return cloudSaveMsg{success: resp.Success, message: resp.Message}
+	}
+}
+
+func validateCloudCredentialsCmd(client pb.PrismServiceClient, provider string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		resp, err := client.ValidateCloudCredentials(ctx, &pb.ValidateCloudCredentialsRequest{
+			Provider: provider,
+		})
+
+		if err != nil {
+			return cloudSaveMsg{success: false, message: err.Error()}
+		}
+		if resp == nil {
+			return cloudSaveMsg{success: false, message: "Empty response from server"}
+		}
+		return cloudSaveMsg{success: resp.Success, message: resp.Message}
+	}
 }
 
 func main() {
