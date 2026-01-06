@@ -14,11 +14,10 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
     import prism_pb2
     import prism_pb2_grpc
-except ImportError:
-    # Fallback if generated files are not yet in path or distinct folder
-    logging.warning("Protobuf modules not found directly. Run proto generation first.")
-    # Assuming they will be here eventually.
-    pass
+except ImportError as e:
+    # Protobuf modules are required - fail with a clear message
+    logging.error("Protobuf modules not found. Run proto generation first: python -m grpc_tools.protoc -I../proto --python_out=. --grpc_python_out=. ../proto/prism.proto")
+    raise ImportError("Required protobuf modules (prism_pb2, prism_pb2_grpc) not found. Run proto generation first.") from e
 
 from database import Database
 from engine import LocalSearchEngine
